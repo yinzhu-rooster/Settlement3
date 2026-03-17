@@ -24,10 +24,10 @@ export function ActionBar() {
   const isSetup = state.gamePhase === 'setup_1' || state.gamePhase === 'setup_2';
   const isMainPhase = state.gamePhase === 'main';
 
-  function doAction(action: any) {
+  function doAction(action: Parameters<typeof dispatchAction>[0]) {
     const result = dispatchAction(action);
     if (!result.success) {
-      setToast((result as any).error);
+      setToast(result.error);
     }
   }
 

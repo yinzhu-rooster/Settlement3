@@ -23,7 +23,8 @@ export function TradeResponseDialog() {
 
   // Find open trades
   const openTrades: TradeOffer[] = [];
-  for (const [, trade] of state.activeTrades) {
+  for (const tid of Object.keys(state.activeTrades)) {
+    const trade = state.activeTrades[tid];
     if (trade.status === 'open') openTrades.push(trade);
   }
 
@@ -37,7 +38,7 @@ export function TradeResponseDialog() {
   const eligiblePlayers = state.players
     .filter(p => p.id !== trade.fromPlayer)
     .filter(p => trade.toPlayer === null || trade.toPlayer === p.id)
-    .filter(p => !trade.respondedBy.has(p.id));
+    .filter(p => !(p.id in trade.respondedBy));
 
   // If everyone has responded, nothing to show
   if (eligiblePlayers.length === 0) return null;

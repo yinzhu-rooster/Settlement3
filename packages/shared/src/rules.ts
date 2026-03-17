@@ -17,6 +17,7 @@ import {
   DEFAULT_GAME_CONFIG,
 } from './types.js';
 import { generateBoard, hexKey } from './board.js';
+import { nextRng, initRngState, shuffleWithRng } from './rng.js';
 
 // ============================================================
 // State creation
@@ -24,7 +25,10 @@ import { generateBoard, hexKey } from './board.js';
 
 export function createInitialState(config: Partial<GameConfig> = {}, seed?: number): GameState {
   const fullConfig = { ...DEFAULT_GAME_CONFIG, ...config };
-  const board = generateBoard(seed);
+  let rngState = initRngState(seed);
+  const boardResult = generateBoard(seed);
+  const board = boardResult.board;
+  rngState = boardResult.rngState;
 
   const players: PlayerState[] = [];
   const colors = ['red', 'blue', 'white', 'orange'] as const;
@@ -56,8 +60,9 @@ export function createInitialState(config: Partial<GameConfig> = {}, seed?: numb
     }
   }
   // Shuffle the deck
-  const rng = createSimpleRng(seed);
-  shuffleInPlace(devCardDeck, rng);
+  const deckShuffle = shuffleWithRng(devCardDeck, rngState);
+  rngState = deckShuffle.nextState;
+  const shuffledDeck = deckShuffle.result;
 
   return {
     config: fullConfig,
@@ -68,34 +73,17 @@ export function createInitialState(config: Partial<GameConfig> = {}, seed?: numb
     turnPhase: 'setup_settlement',
     turnNumber: 0,
     diceRoll: null,
-    devCardDeck,
-    activeTrades: new Map(),
-    playersNeedingToDiscard: new Set(),
+    devCardDeck: shuffledDeck,
+    activeTrades: {},
+    playersNeedingToDiscard: [],
     robberStealTargets: [],
     winner: null,
     lastError: null,
     history: [],
     setupRound: 0,
+    lastSetupVertexId: null,
+    rngState,
   };
-}
-
-// ============================================================
-// Simple RNG
-// ============================================================
-
-function createSimpleRng(seed?: number): () => number {
-  let state = seed ?? Math.floor(Math.random() * 2147483647);
-  return () => {
-    state = (state * 1664525 + 1013904223) & 0x7fffffff;
-    return state / 0x7fffffff;
-  };
-}
-
-function shuffleInPlace<T>(arr: T[], rng: () => number): void {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
 }
 
 // ============================================================
@@ -109,10 +97,8 @@ export function cloneState(state: GameState): GameState {
     board: cloneBoard(state.board),
     players: state.players.map(clonePlayer),
     devCardDeck: [...state.devCardDeck],
-    activeTrades: new Map(
-      Array.from(state.activeTrades.entries()).map(([k, v]) => [k, cloneTrade(v)])
-    ),
-    playersNeedingToDiscard: new Set(state.playersNeedingToDiscard),
+    activeTrades: cloneActiveTrades(state.activeTrades),
+    playersNeedingToDiscard: [...state.playersNeedingToDiscard],
     robberStealTargets: [...state.robberStealTargets],
     // Don't deep-clone history — it's a stack of already-cloned states
     history: [...state.history],
@@ -120,25 +106,38 @@ export function cloneState(state: GameState): GameState {
 }
 
 function cloneBoard(board: Board): Board {
+  // Issue #8: Adjacency maps and ports never change after generation.
+  // Only hexes, vertices, and edges need deep cloning.
   return {
     hexes: board.hexes.map(h => ({ ...h })),
-    vertices: new Map(Array.from(board.vertices.entries()).map(([k, v]) => [k, { ...v }])),
-    edges: new Map(Array.from(board.edges.entries()).map(([k, v]) => [k, { ...v }])),
-    ports: board.ports.map(p => ({ ...p, vertices: [...p.vertices] as [string, string] })),
-    hexToVertices: cloneMapOfArrays(board.hexToVertices),
-    hexToEdges: cloneMapOfArrays(board.hexToEdges),
-    vertexToHexes: cloneMapOfArrays(board.vertexToHexes),
-    vertexToEdges: cloneMapOfArrays(board.vertexToEdges),
-    vertexToVertices: cloneMapOfArrays(board.vertexToVertices),
-    edgeToVertices: new Map(
-      Array.from(board.edgeToVertices.entries()).map(([k, v]) => [k, [...v] as [string, string]])
-    ),
-    edgeToHexes: cloneMapOfArrays(board.edgeToHexes),
+    vertices: cloneRecordOfObjects(board.vertices),
+    edges: cloneRecordOfObjects(board.edges),
+    // Shared by reference — these never mutate after board generation
+    ports: board.ports,
+    hexToVertices: board.hexToVertices,
+    hexToEdges: board.hexToEdges,
+    vertexToHexes: board.vertexToHexes,
+    vertexToEdges: board.vertexToEdges,
+    vertexToVertices: board.vertexToVertices,
+    edgeToVertices: board.edgeToVertices,
+    edgeToHexes: board.edgeToHexes,
   };
 }
 
-function cloneMapOfArrays<V>(map: Map<string, V[]>): Map<string, V[]> {
-  return new Map(Array.from(map.entries()).map(([k, v]) => [k, [...v]]));
+function cloneRecordOfObjects<V extends object>(record: Record<string, V>): Record<string, V> {
+  const result: Record<string, V> = {};
+  for (const key of Object.keys(record)) {
+    result[key] = { ...record[key] };
+  }
+  return result;
+}
+
+function cloneActiveTrades(trades: Record<string, TradeOffer>): Record<string, TradeOffer> {
+  const result: Record<string, TradeOffer> = {};
+  for (const key of Object.keys(trades)) {
+    result[key] = cloneTrade(trades[key]);
+  }
+  return result;
 }
 
 function clonePlayer(p: PlayerState): PlayerState {
@@ -155,7 +154,7 @@ function cloneTrade(t: TradeOffer): TradeOffer {
     ...t,
     offering: { ...t.offering },
     requesting: { ...t.requesting },
-    respondedBy: new Map(t.respondedBy),
+    respondedBy: { ...t.respondedBy },
   };
 }
 
@@ -191,14 +190,14 @@ function totalResources(player: PlayerState): number {
 // ============================================================
 
 function canPlaceSettlement(state: GameState, vertexId: string, playerIdx: number, isSetup: boolean): string | null {
-  const vertex = state.board.vertices.get(vertexId);
+  const vertex = state.board.vertices[vertexId];
   if (!vertex) return 'Invalid vertex';
   if (vertex.building !== null) return 'Vertex already occupied';
 
   // Distance rule — no adjacent settlement/city
-  const neighbors = state.board.vertexToVertices.get(vertexId) ?? [];
+  const neighbors = state.board.vertexToVertices[vertexId] ?? [];
   for (const nid of neighbors) {
-    const neighbor = state.board.vertices.get(nid);
+    const neighbor = state.board.vertices[nid];
     if (neighbor?.building !== null) return 'Too close to another settlement';
   }
 
@@ -207,9 +206,9 @@ function canPlaceSettlement(state: GameState, vertexId: string, playerIdx: numbe
 
   if (!isSetup) {
     // Must be adjacent to own road
-    const adjacentEdges = state.board.vertexToEdges.get(vertexId) ?? [];
+    const adjacentEdges = state.board.vertexToEdges[vertexId] ?? [];
     const hasOwnRoad = adjacentEdges.some(eid => {
-      const edge = state.board.edges.get(eid);
+      const edge = state.board.edges[eid];
       return edge?.road && edge.owner === playerIdx;
     });
     if (!hasOwnRoad) return 'Must be adjacent to your road';
@@ -221,14 +220,16 @@ function canPlaceSettlement(state: GameState, vertexId: string, playerIdx: numbe
 }
 
 function canPlaceRoad(state: GameState, edgeId: string, playerIdx: number, isSetup: boolean, setupVertexId?: string): string | null {
-  const edge = state.board.edges.get(edgeId);
+  const edge = state.board.edges[edgeId];
   if (!edge) return 'Invalid edge';
   if (edge.road) return 'Edge already has a road';
 
   const player = state.players[playerIdx];
   if (player.roadsRemaining <= 0) return 'No roads remaining';
 
-  const [v1, v2] = state.board.edgeToVertices.get(edgeId) ?? [null, null];
+  const edgeVerts = state.board.edgeToVertices[edgeId];
+  const v1 = edgeVerts?.[0] ?? null;
+  const v2 = edgeVerts?.[1] ?? null;
   if (!v1 || !v2) return 'Invalid edge';
 
   if (isSetup && setupVertexId) {
@@ -239,18 +240,18 @@ function canPlaceRoad(state: GameState, edgeId: string, playerIdx: number, isSet
   } else if (!isSetup) {
     // Must connect to own settlement/city or own road
     const connectsToOwnBuilding = [v1, v2].some(vid => {
-      const v = state.board.vertices.get(vid);
+      const v = state.board.vertices[vid];
       return v?.owner === playerIdx;
     });
     const connectsToOwnRoad = [v1, v2].some(vid => {
       // Check if any road from this vertex belongs to the player
       // But the vertex must not be occupied by an opponent (road blocked by opponent building)
-      const vertexOwner = state.board.vertices.get(vid)?.owner;
-      if (vertexOwner !== null && vertexOwner !== playerIdx) return false;
-      const vedges = state.board.vertexToEdges.get(vid) ?? [];
+      const vertexOwner = state.board.vertices[vid]?.owner;
+      if (vertexOwner !== null && vertexOwner !== undefined && vertexOwner !== playerIdx) return false;
+      const vedges = state.board.vertexToEdges[vid] ?? [];
       return vedges.some(eid => {
         if (eid === edgeId) return false;
-        const e = state.board.edges.get(eid);
+        const e = state.board.edges[eid];
         return e?.road && e.owner === playerIdx;
       });
     });
@@ -273,7 +274,8 @@ function canPlaceRoad(state: GameState, edgeId: string, playerIdx: number, isSet
 
 export function calculateLongestRoad(state: GameState, playerIdx: number): number {
   const playerEdges: Set<string> = new Set();
-  for (const [eid, edge] of state.board.edges) {
+  for (const eid of Object.keys(state.board.edges)) {
+    const edge = state.board.edges[eid];
     if (edge.road && edge.owner === playerIdx) {
       playerEdges.add(eid);
     }
@@ -287,16 +289,16 @@ export function calculateLongestRoad(state: GameState, playerIdx: number): numbe
   function dfs(vertexId: string, visited: Set<string>, length: number): void {
     maxLength = Math.max(maxLength, length);
 
-    const edges = state.board.vertexToEdges.get(vertexId) ?? [];
+    const edges = state.board.vertexToEdges[vertexId] ?? [];
     for (const eid of edges) {
       if (!playerEdges.has(eid) || visited.has(eid)) continue;
 
       // Check if vertex is blocked by opponent building
-      const v = state.board.vertices.get(vertexId);
+      const v = state.board.vertices[vertexId];
       if (v && v.owner !== null && v.owner !== playerIdx && length > 0) continue;
 
-      const [v1, v2] = state.board.edgeToVertices.get(eid) ?? ['', ''];
-      const nextVertex = v1 === vertexId ? v2 : v1;
+      const edgeVerts = state.board.edgeToVertices[eid];
+      const nextVertex = edgeVerts[0] === vertexId ? edgeVerts[1] : edgeVerts[0];
 
       visited.add(eid);
       dfs(nextVertex, visited, length + 1);
@@ -307,9 +309,9 @@ export function calculateLongestRoad(state: GameState, playerIdx: number): numbe
   // Find all vertices that are endpoints of player's roads
   const startVertices = new Set<string>();
   for (const eid of playerEdges) {
-    const [v1, v2] = state.board.edgeToVertices.get(eid) ?? ['', ''];
-    startVertices.add(v1);
-    startVertices.add(v2);
+    const edgeVerts = state.board.edgeToVertices[eid];
+    startVertices.add(edgeVerts[0]);
+    startVertices.add(edgeVerts[1]);
   }
 
   for (const sv of startVertices) {
@@ -320,6 +322,15 @@ export function calculateLongestRoad(state: GameState, playerIdx: number): numbe
 }
 
 function updateLongestRoad(state: GameState): void {
+  // Bug #4 fix: save the current holder BEFORE clearing flags
+  let currentHolderIdx = -1;
+  for (let i = 0; i < state.players.length; i++) {
+    if (state.players[i].hasLongestRoad) {
+      currentHolderIdx = i;
+      break;
+    }
+  }
+
   // Recalculate for all players
   let longestLength = 0;
   let longestPlayer = -1;
@@ -342,12 +353,9 @@ function updateLongestRoad(state: GameState): void {
     if (tiedPlayers.length === 1) {
       state.players[longestPlayer].hasLongestRoad = true;
     } else {
-      // On a tie, the first player to reach that length keeps it
-      // For now, give it to the lowest-indexed player among tied
-      // (or keep current holder if they're tied)
-      const currentHolder = state.players.find(p => p.hasLongestRoad);
-      if (currentHolder && currentHolder.longestRoadLength === longestLength) {
-        currentHolder.hasLongestRoad = true;
+      // On a tie, the current holder keeps it if they're tied
+      if (currentHolderIdx >= 0 && state.players[currentHolderIdx].longestRoadLength === longestLength) {
+        state.players[currentHolderIdx].hasLongestRoad = true;
       } else {
         state.players[longestPlayer].hasLongestRoad = true;
       }
@@ -381,7 +389,8 @@ function calculateVP(state: GameState, playerIdx: number): number {
   let vp = 0;
 
   // Count buildings
-  for (const [, vertex] of state.board.vertices) {
+  for (const vid of Object.keys(state.board.vertices)) {
+    const vertex = state.board.vertices[vid];
     if (vertex.owner === playerIdx) {
       vp += vertex.building === 'city' ? 2 : 1;
     }
@@ -514,22 +523,30 @@ function handleRollDice(state: GameState, playerIdx: number): ActionResult {
   if (state.gamePhase !== 'main') return { success: false, error: 'Cannot roll dice now' };
   if (state.turnPhase !== 'pre_roll') return { success: false, error: 'Already rolled this turn' };
 
-  const die1 = Math.floor(Math.random() * 6) + 1;
-  const die2 = Math.floor(Math.random() * 6) + 1;
+  // Bug #5: Use deterministic RNG instead of Math.random
+  let rng = state.rngState;
+  const r1 = nextRng(rng);
+  rng = r1.nextState;
+  const die1 = Math.floor(r1.value * 6) + 1;
+  const r2 = nextRng(rng);
+  rng = r2.nextState;
+  const die2 = Math.floor(r2.value * 6) + 1;
+  state.rngState = rng;
+
   const total = die1 + die2;
 
   state.diceRoll = [die1, die2];
 
   if (total === 7) {
     // Check who needs to discard
-    const discardPlayers = new Set<number>();
+    const discardPlayers: number[] = [];
     for (let i = 0; i < state.players.length; i++) {
       if (totalResources(state.players[i]) > state.config.discardThreshold) {
-        discardPlayers.add(i);
+        discardPlayers.push(i);
       }
     }
 
-    if (discardPlayers.size > 0) {
+    if (discardPlayers.length > 0) {
       state.playersNeedingToDiscard = discardPlayers;
       state.turnPhase = 'robber_discard';
     } else {
@@ -550,10 +567,10 @@ function distributeResources(state: GameState, roll: number): void {
     if (hex.resource === 'desert') continue;
 
     const hk = hexKey(hex.q, hex.r);
-    const vertices = state.board.hexToVertices.get(hk) ?? [];
+    const vertices = state.board.hexToVertices[hk] ?? [];
 
     for (const vid of vertices) {
-      const vertex = state.board.vertices.get(vid);
+      const vertex = state.board.vertices[vid];
       if (!vertex || vertex.building === null || vertex.owner === null) continue;
 
       const amount = vertex.building === 'city' ? 2 : 1;
@@ -576,7 +593,7 @@ function handlePlaceSettlement(state: GameState, playerIdx: number, vertexId: st
   const error = canPlaceSettlement(state, vertexId, playerIdx, isSetup);
   if (error) return { success: false, error };
 
-  const vertex = state.board.vertices.get(vertexId)!;
+  const vertex = state.board.vertices[vertexId]!;
   vertex.building = 'settlement';
   vertex.owner = playerIdx;
   state.players[playerIdx].settlementsRemaining--;
@@ -595,7 +612,7 @@ function handlePlaceSettlement(state: GameState, playerIdx: number, vertexId: st
   if (isSetup) {
     // Second settlement in setup_2 grants initial resources
     if (state.gamePhase === 'setup_2') {
-      const adjacentHexes = state.board.vertexToHexes.get(vertexId) ?? [];
+      const adjacentHexes = state.board.vertexToHexes[vertexId] ?? [];
       for (const hk of adjacentHexes) {
         const hex = state.board.hexes.find(h => hexKey(h.q, h.r) === hk);
         if (hex && hex.resource !== 'desert') {
@@ -604,8 +621,8 @@ function handlePlaceSettlement(state: GameState, playerIdx: number, vertexId: st
       }
     }
     state.turnPhase = 'setup_road';
-    // Store the last placed settlement for road validation
-    (state as any)._lastSetupVertex = vertexId;
+    // Bug #1: Store the last placed settlement in proper state field
+    state.lastSetupVertexId = vertexId;
   }
 
   updateLongestRoad(state);
@@ -618,7 +635,7 @@ function handlePlaceCity(state: GameState, playerIdx: number, vertexId: string):
   if (state.gamePhase !== 'main') return { success: false, error: 'Cannot upgrade during setup' };
   if (state.turnPhase !== 'post_roll') return { success: false, error: 'Must roll dice first' };
 
-  const vertex = state.board.vertices.get(vertexId);
+  const vertex = state.board.vertices[vertexId];
   if (!vertex) return { success: false, error: 'Invalid vertex' };
   if (vertex.building !== 'settlement') return { success: false, error: 'No settlement to upgrade' };
   if (vertex.owner !== playerIdx) return { success: false, error: 'Not your settlement' };
@@ -649,11 +666,12 @@ function handlePlaceRoad(state: GameState, playerIdx: number, edgeId: string): A
     if (state.turnPhase !== 'post_roll') return { success: false, error: 'Must roll dice first' };
   }
 
-  const setupVertexId = isSetup ? (state as any)._lastSetupVertex : undefined;
+  // Bug #1: Use state.lastSetupVertexId instead of (state as any)._lastSetupVertex
+  const setupVertexId = isSetup ? (state.lastSetupVertexId ?? undefined) : undefined;
   const error = canPlaceRoad(state, edgeId, playerIdx, isSetup, setupVertexId);
   if (error) return { success: false, error };
 
-  const edge = state.board.edges.get(edgeId)!;
+  const edge = state.board.edges[edgeId]!;
   edge.road = true;
   edge.owner = playerIdx;
   state.players[playerIdx].roadsRemaining--;
@@ -663,7 +681,7 @@ function handlePlaceRoad(state: GameState, playerIdx: number, edgeId: string): A
   }
 
   if (isSetup) {
-    delete (state as any)._lastSetupVertex;
+    state.lastSetupVertexId = null;
     advanceSetup(state);
   } else if (state.turnPhase === 'road_building_1') {
     state.turnPhase = 'road_building_2';
@@ -773,9 +791,9 @@ function handleMoveRobber(state: GameState, playerIdx: number, hexQ: number, hex
   // Friendly robber check
   if (state.config.friendlyRobber) {
     const hk = hexKey(hexQ, hexR);
-    const adjacentVertices = state.board.hexToVertices.get(hk) ?? [];
+    const adjacentVertices = state.board.hexToVertices[hk] ?? [];
     for (const vid of adjacentVertices) {
-      const vertex = state.board.vertices.get(vid);
+      const vertex = state.board.vertices[vid];
       if (vertex && vertex.owner !== null && vertex.owner !== playerIdx) {
         if (state.players[vertex.owner].victoryPoints <= 2) {
           return { success: false, error: 'Friendly robber: cannot target player with 2 or fewer VP' };
@@ -792,10 +810,10 @@ function handleMoveRobber(state: GameState, playerIdx: number, hexQ: number, hex
 
   // Find steal targets
   const hk = hexKey(hexQ, hexR);
-  const adjacentVertices = state.board.hexToVertices.get(hk) ?? [];
+  const adjacentVertices = state.board.hexToVertices[hk] ?? [];
   const targets = new Set<number>();
   for (const vid of adjacentVertices) {
-    const vertex = state.board.vertices.get(vid);
+    const vertex = state.board.vertices[vid];
     if (vertex && vertex.owner !== null && vertex.owner !== playerIdx && totalResources(state.players[vertex.owner]) > 0) {
       targets.add(vertex.owner);
     }
@@ -827,7 +845,10 @@ function stealRandomResource(state: GameState, thiefIdx: number, victimIdx: numb
   }
   if (available.length === 0) return;
 
-  const stolen = available[Math.floor(Math.random() * available.length)];
+  // Bug #5: Use deterministic RNG instead of Math.random
+  const { value, nextState } = nextRng(state.rngState);
+  state.rngState = nextState;
+  const stolen = available[Math.floor(value * available.length)];
   victim.resources[stolen]--;
   state.players[thiefIdx].resources[stolen]++;
 }
@@ -846,7 +867,7 @@ function handleRobberSteal(state: GameState, playerIdx: number, targetPlayer: nu
 
 function handleDiscardResources(state: GameState, playerIdx: number, resources: Partial<Record<Resource, number>>): ActionResult {
   if (state.turnPhase !== 'robber_discard') return { success: false, error: 'Not the right time to discard' };
-  if (!state.playersNeedingToDiscard.has(playerIdx)) return { success: false, error: "You don't need to discard" };
+  if (!state.playersNeedingToDiscard.includes(playerIdx)) return { success: false, error: "You don't need to discard" };
 
   const player = state.players[playerIdx];
   const total = totalResources(player);
@@ -866,9 +887,9 @@ function handleDiscardResources(state: GameState, playerIdx: number, resources: 
   }
 
   deductResources(player, resources);
-  state.playersNeedingToDiscard.delete(playerIdx);
+  state.playersNeedingToDiscard = state.playersNeedingToDiscard.filter(id => id !== playerIdx);
 
-  if (state.playersNeedingToDiscard.size === 0) {
+  if (state.playersNeedingToDiscard.length === 0) {
     state.turnPhase = 'robber_move';
   }
 
@@ -889,7 +910,10 @@ function handleTradeOffer(
   const player = state.players[playerIdx];
   if (!hasResources(player, offering)) return { success: false, error: 'Not enough resources to offer' };
 
-  const tradeId = `trade_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  // Use deterministic RNG for trade ID generation
+  const { value, nextState } = nextRng(state.rngState);
+  state.rngState = nextState;
+  const tradeId = `trade_${state.turnNumber}_${Math.floor(value * 1000000)}`;
   const trade: TradeOffer = {
     id: tradeId,
     fromPlayer: playerIdx,
@@ -897,15 +921,15 @@ function handleTradeOffer(
     offering: { ...offering },
     requesting: { ...requesting },
     status: 'open',
-    respondedBy: new Map(),
+    respondedBy: {},
   };
 
-  state.activeTrades.set(tradeId, trade);
+  state.activeTrades[tradeId] = trade;
   return { success: true, state };
 }
 
 function handleTradeAccept(state: GameState, playerIdx: number, tradeId: string): ActionResult {
-  const trade = state.activeTrades.get(tradeId);
+  const trade = state.activeTrades[tradeId];
   if (!trade) return { success: false, error: 'Trade not found' };
   if (trade.status !== 'open') return { success: false, error: 'Trade is no longer open' };
   if (trade.fromPlayer === playerIdx) return { success: false, error: 'Cannot accept your own trade' };
@@ -924,27 +948,27 @@ function handleTradeAccept(state: GameState, playerIdx: number, tradeId: string)
   addResources(offerer, trade.requesting);
 
   trade.status = 'accepted';
-  trade.respondedBy.set(playerIdx, 'accepted');
+  trade.respondedBy[playerIdx] = 'accepted';
 
   // Close all other open trades
-  for (const [, t] of state.activeTrades) {
-    if (t.status === 'open') t.status = 'cancelled';
+  for (const tid of Object.keys(state.activeTrades)) {
+    if (state.activeTrades[tid].status === 'open') state.activeTrades[tid].status = 'cancelled';
   }
 
   return { success: true, state };
 }
 
 function handleTradeReject(state: GameState, playerIdx: number, tradeId: string): ActionResult {
-  const trade = state.activeTrades.get(tradeId);
+  const trade = state.activeTrades[tradeId];
   if (!trade) return { success: false, error: 'Trade not found' };
   if (trade.status !== 'open') return { success: false, error: 'Trade is no longer open' };
 
-  trade.respondedBy.set(playerIdx, 'rejected');
+  trade.respondedBy[playerIdx] = 'rejected';
 
   // If all target players rejected, auto-cancel
   if (trade.toPlayer === null) {
     const allRejected = state.players.every(
-      (p, i) => i === trade.fromPlayer || trade.respondedBy.get(i) === 'rejected'
+      (p, i) => i === trade.fromPlayer || trade.respondedBy[i] === 'rejected'
     );
     if (allRejected) trade.status = 'rejected';
   } else {
@@ -955,7 +979,7 @@ function handleTradeReject(state: GameState, playerIdx: number, tradeId: string)
 }
 
 function handleTradeCancel(state: GameState, playerIdx: number, tradeId: string): ActionResult {
-  const trade = state.activeTrades.get(tradeId);
+  const trade = state.activeTrades[tradeId];
   if (!trade) return { success: false, error: 'Trade not found' };
   if (trade.fromPlayer !== playerIdx) return { success: false, error: 'Only the offerer can cancel' };
   if (trade.status !== 'open') return { success: false, error: 'Trade is no longer open' };
@@ -971,7 +995,7 @@ function handleTradeCounter(
   offering: Partial<Record<Resource, number>>,
   requesting: Partial<Record<Resource, number>>
 ): ActionResult {
-  const originalTrade = state.activeTrades.get(tradeId);
+  const originalTrade = state.activeTrades[tradeId];
   if (!originalTrade) return { success: false, error: 'Trade not found' };
   if (originalTrade.status !== 'open') return { success: false, error: 'Trade is no longer open' };
   if (originalTrade.fromPlayer === playerIdx) return { success: false, error: 'Cannot counter your own trade' };
@@ -979,8 +1003,10 @@ function handleTradeCounter(
   const player = state.players[playerIdx];
   if (!hasResources(player, offering)) return { success: false, error: 'Not enough resources for counter-offer' };
 
-  // Create new counter-offer
-  const counterId = `trade_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  // Create new counter-offer with deterministic ID
+  const { value, nextState } = nextRng(state.rngState);
+  state.rngState = nextState;
+  const counterId = `trade_${state.turnNumber}_${Math.floor(value * 1000000)}`;
   const counterTrade: TradeOffer = {
     id: counterId,
     fromPlayer: playerIdx,
@@ -988,10 +1014,10 @@ function handleTradeCounter(
     offering: { ...offering },
     requesting: { ...requesting },
     status: 'open',
-    respondedBy: new Map(),
+    respondedBy: {},
   };
 
-  state.activeTrades.set(counterId, counterTrade);
+  state.activeTrades[counterId] = counterTrade;
   return { success: true, state };
 }
 
@@ -1056,8 +1082,8 @@ function handleEndTurn(state: GameState, playerIdx: number): ActionResult {
   state.players[playerIdx].devCardsPlayedThisTurn = 0;
 
   // Cancel all open trades
-  for (const [, trade] of state.activeTrades) {
-    if (trade.status === 'open') trade.status = 'cancelled';
+  for (const tid of Object.keys(state.activeTrades)) {
+    if (state.activeTrades[tid].status === 'open') state.activeTrades[tid].status = 'cancelled';
   }
 
   // Advance to next player
@@ -1075,7 +1101,7 @@ function handleEndTurn(state: GameState, playerIdx: number): ActionResult {
 export function getValidSettlementVertices(state: GameState, playerIdx: number): string[] {
   const isSetup = state.gamePhase === 'setup_1' || state.gamePhase === 'setup_2';
   const valid: string[] = [];
-  for (const [vid] of state.board.vertices) {
+  for (const vid of Object.keys(state.board.vertices)) {
     if (canPlaceSettlement(state, vid, playerIdx, isSetup) === null) {
       valid.push(vid);
     }
@@ -1085,9 +1111,9 @@ export function getValidSettlementVertices(state: GameState, playerIdx: number):
 
 export function getValidRoadEdges(state: GameState, playerIdx: number): string[] {
   const isSetup = state.gamePhase === 'setup_1' || state.gamePhase === 'setup_2';
-  const setupVertexId = isSetup ? (state as any)._lastSetupVertex : undefined;
+  const setupVertexId = isSetup ? (state.lastSetupVertexId ?? undefined) : undefined;
   const valid: string[] = [];
-  for (const [eid] of state.board.edges) {
+  for (const eid of Object.keys(state.board.edges)) {
     if (canPlaceRoad(state, eid, playerIdx, isSetup, setupVertexId) === null) {
       valid.push(eid);
     }
@@ -1097,7 +1123,8 @@ export function getValidRoadEdges(state: GameState, playerIdx: number): string[]
 
 export function getValidCityVertices(state: GameState, playerIdx: number): string[] {
   const valid: string[] = [];
-  for (const [vid, vertex] of state.board.vertices) {
+  for (const vid of Object.keys(state.board.vertices)) {
+    const vertex = state.board.vertices[vid];
     if (vertex.building === 'settlement' && vertex.owner === playerIdx) {
       if (hasResources(state.players[playerIdx], BUILDING_COSTS.city) &&
           state.players[playerIdx].citiesRemaining > 0) {

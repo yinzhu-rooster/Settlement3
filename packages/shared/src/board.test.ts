@@ -3,12 +3,12 @@ import { generateBoard, hexToPixel, hexCorners, vertexPixelPosition, hexKey } fr
 
 describe('generateBoard', () => {
   it('generates 19 hexes', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     expect(board.hexes).toHaveLength(19);
   });
 
   it('has correct resource distribution', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     const counts: Record<string, number> = {};
     for (const hex of board.hexes) {
       counts[hex.resource] = (counts[hex.resource] ?? 0) + 1;
@@ -22,14 +22,14 @@ describe('generateBoard', () => {
   });
 
   it('desert has no number token', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     const desert = board.hexes.find(h => h.resource === 'desert');
     expect(desert).toBeDefined();
     expect(desert!.numberToken).toBeNull();
   });
 
   it('desert has the robber', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     const desert = board.hexes.find(h => h.resource === 'desert');
     expect(desert!.hasRobber).toBe(true);
     const nonDesert = board.hexes.filter(h => h.resource !== 'desert');
@@ -37,28 +37,28 @@ describe('generateBoard', () => {
   });
 
   it('has 18 number tokens on non-desert hexes', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     const withTokens = board.hexes.filter(h => h.numberToken !== null);
     expect(withTokens).toHaveLength(18);
   });
 
   it('generates 54 vertices', () => {
-    const board = generateBoard(42);
-    expect(board.vertices.size).toBe(54);
+    const { board } = generateBoard(42);
+    expect(Object.keys(board.vertices).length).toBe(54);
   });
 
   it('generates 72 edges', () => {
-    const board = generateBoard(42);
-    expect(board.edges.size).toBe(72);
+    const { board } = generateBoard(42);
+    expect(Object.keys(board.edges).length).toBe(72);
   });
 
   it('generates 9 ports', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     expect(board.ports).toHaveLength(9);
   });
 
   it('has correct port distribution', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     const generic = board.ports.filter(p => p.type === 'generic');
     const specialty = board.ports.filter(p => p.type !== 'generic');
     expect(generic).toHaveLength(4);
@@ -66,43 +66,44 @@ describe('generateBoard', () => {
   });
 
   it('each hex has 6 vertices', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     for (const hex of board.hexes) {
       const hk = hexKey(hex.q, hex.r);
-      const verts = board.hexToVertices.get(hk);
+      const verts = board.hexToVertices[hk];
       expect(verts).toBeDefined();
       expect(verts!).toHaveLength(6);
     }
   });
 
   it('each hex has 6 edges', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     for (const hex of board.hexes) {
       const hk = hexKey(hex.q, hex.r);
-      const edgs = board.hexToEdges.get(hk);
+      const edgs = board.hexToEdges[hk];
       expect(edgs).toBeDefined();
       expect(edgs!).toHaveLength(6);
     }
   });
 
   it('vertex-vertex adjacency has 2 or 3 neighbors', () => {
-    const board = generateBoard(42);
-    for (const [vid, neighbors] of board.vertexToVertices) {
+    const { board } = generateBoard(42);
+    for (const vid of Object.keys(board.vertexToVertices)) {
+      const neighbors = board.vertexToVertices[vid];
       expect(neighbors.length).toBeGreaterThanOrEqual(2);
       expect(neighbors.length).toBeLessThanOrEqual(3);
     }
   });
 
   it('tries to avoid 6/8 adjacency', () => {
-    const board = generateBoard(42);
+    const { board } = generateBoard(42);
     // Check that no two adjacent hexes both have 6 or 8
     let violations = 0;
     for (const hex of board.hexes) {
       if (hex.numberToken !== 6 && hex.numberToken !== 8) continue;
       const hk = hexKey(hex.q, hex.r);
-      const adjVerts = board.hexToVertices.get(hk) ?? [];
+      const adjVerts = board.hexToVertices[hk] ?? [];
       for (const vid of adjVerts) {
-        const adjHexes = board.vertexToHexes.get(vid) ?? [];
+        const adjHexes = board.vertexToHexes[vid] ?? [];
         for (const ahk of adjHexes) {
           if (ahk === hk) continue;
           const adjHex = board.hexes.find(h => hexKey(h.q, h.r) === ahk);
@@ -117,15 +118,15 @@ describe('generateBoard', () => {
   });
 
   it('is deterministic with the same seed', () => {
-    const board1 = generateBoard(123);
-    const board2 = generateBoard(123);
+    const { board: board1 } = generateBoard(123);
+    const { board: board2 } = generateBoard(123);
     expect(board1.hexes.map(h => h.resource)).toEqual(board2.hexes.map(h => h.resource));
     expect(board1.hexes.map(h => h.numberToken)).toEqual(board2.hexes.map(h => h.numberToken));
   });
 
   it('produces different boards with different seeds', () => {
-    const board1 = generateBoard(1);
-    const board2 = generateBoard(2);
+    const { board: board1 } = generateBoard(1);
+    const { board: board2 } = generateBoard(2);
     const r1 = board1.hexes.map(h => h.resource).join(',');
     const r2 = board2.hexes.map(h => h.resource).join(',');
     expect(r1).not.toBe(r2);

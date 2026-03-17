@@ -63,17 +63,17 @@ export interface Port {
 
 export interface Board {
   hexes: HexTile[];
-  vertices: Map<string, Vertex>;
-  edges: Map<string, Edge>;
+  vertices: Record<string, Vertex>;
+  edges: Record<string, Edge>;
   ports: Port[];
   // Adjacency maps
-  hexToVertices: Map<string, string[]>;
-  hexToEdges: Map<string, string[]>;
-  vertexToHexes: Map<string, string[]>;
-  vertexToEdges: Map<string, string[]>;
-  vertexToVertices: Map<string, string[]>;
-  edgeToVertices: Map<string, [string, string]>;
-  edgeToHexes: Map<string, string[]>;
+  hexToVertices: Record<string, string[]>;
+  hexToEdges: Record<string, string[]>;
+  vertexToHexes: Record<string, string[]>;
+  vertexToEdges: Record<string, string[]>;
+  vertexToVertices: Record<string, string[]>;
+  edgeToVertices: Record<string, [string, string]>;
+  edgeToHexes: Record<string, string[]>;
 }
 
 // ============================================================
@@ -127,7 +127,7 @@ export interface TradeOffer {
   offering: Partial<Record<Resource, number>>;
   requesting: Partial<Record<Resource, number>>;
   status: 'open' | 'accepted' | 'rejected' | 'cancelled';
-  respondedBy: Map<number, 'accepted' | 'rejected'>;
+  respondedBy: Record<number, 'accepted' | 'rejected'>;
 }
 
 // ============================================================
@@ -163,9 +163,9 @@ export interface GameState {
   turnNumber: number;
   diceRoll: [number, number] | null;
   devCardDeck: DevCardType[];
-  activeTrades: Map<string, TradeOffer>;
+  activeTrades: Record<string, TradeOffer>;
   // Discard tracking
-  playersNeedingToDiscard: Set<number>;
+  playersNeedingToDiscard: number[];
   // Robber steal choices
   robberStealTargets: number[];
   // Winner
@@ -176,6 +176,10 @@ export interface GameState {
   history: GameState[];
   // Setup tracking
   setupRound: number;
+  // Last placed settlement vertex for setup road validation (Bug #1)
+  lastSetupVertexId: string | null;
+  // Deterministic RNG state (Bug #5)
+  rngState: number;
 }
 
 // ============================================================
@@ -211,7 +215,9 @@ export type ActionResult =
 // Constants
 // ============================================================
 
-export const BUILDING_COSTS: Record<string, Partial<Record<Resource, number>>> = {
+export type BuildableType = 'road' | 'settlement' | 'city' | 'devCard';
+
+export const BUILDING_COSTS: Record<BuildableType, Partial<Record<Resource, number>>> = {
   road: { wood: 1, brick: 1 },
   settlement: { wood: 1, brick: 1, sheep: 1, wheat: 1 },
   city: { wheat: 2, ore: 3 },

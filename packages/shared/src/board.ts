@@ -8,6 +8,7 @@ import {
   type PortType,
   type HexCoord,
 } from './types.js';
+import { nextRng, initRngState, shuffleWithRng } from './rng.js';
 
 // ============================================================
 // Hex grid coordinate helpers (axial coordinates)
@@ -104,14 +105,12 @@ const HEX_NEIGHBORS: HexCoord[] = [
  * For a hex at (q,r), vertex i is at the junction of:
  *   hex(q,r), neighbor[i], neighbor[(i+1)%6]
  */
-function hexVertices(hex: HexCoord, hexSet: Set<string>): string[] {
+function hexVertices(hex: HexCoord): string[] {
   const vertices: string[] = [];
   for (let i = 0; i < 6; i++) {
     const n1 = { q: hex.q + HEX_NEIGHBORS[i].q, r: hex.r + HEX_NEIGHBORS[i].r };
     const n2 = { q: hex.q + HEX_NEIGHBORS[(i + 1) % 6].q, r: hex.r + HEX_NEIGHBORS[(i + 1) % 6].r };
-    // Vertex is defined by the hexes that actually exist on the board
-    const adjacentHexes = [hex, n1, n2].filter(h => hexSet.has(hexKey(h.q, h.r)));
-    // But we still use all three for unique ID (even if hex doesn't exist on board)
+    // Use all three for unique ID (even if neighbor hex doesn't exist on board)
     vertices.push(vertexId([hex, n1, n2]));
   }
   return vertices;
@@ -121,8 +120,8 @@ function hexVertices(hex: HexCoord, hexSet: Set<string>): string[] {
  * Returns the 6 edges around a hex.
  * Each edge connects two adjacent vertices.
  */
-function hexEdges(hex: HexCoord, hexSet: Set<string>): string[] {
-  const verts = hexVertices(hex, hexSet);
+function hexEdges(hex: HexCoord): string[] {
+  const verts = hexVertices(hex);
   const edges: string[] = [];
   for (let i = 0; i < 6; i++) {
     edges.push(edgeId(verts[i], verts[(i + 1) % 6]));
@@ -156,27 +155,6 @@ const PORT_DEFS: PortDef[] = [
 ];
 
 // ============================================================
-// Seeded random (simple LCG for reproducible boards)
-// ============================================================
-
-function createRng(seed: number): () => number {
-  let state = seed;
-  return () => {
-    state = (state * 1664525 + 1013904223) & 0x7fffffff;
-    return state / 0x7fffffff;
-  };
-}
-
-function shuffle<T>(arr: T[], rng: () => number): T[] {
-  const result = [...arr];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
-}
-
-// ============================================================
 // Board generation
 // ============================================================
 
@@ -206,12 +184,13 @@ function has68Neighbor(hexes: HexTile[], index: number): boolean {
   return false;
 }
 
-export function generateBoard(seed?: number): Board {
-  const rng = createRng(seed ?? Math.floor(Math.random() * 2147483647));
+export function generateBoard(seed?: number): { board: Board; rngState: number } {
+  let rngState = initRngState(seed);
 
   // Shuffle resources
-  const resources = shuffle(RESOURCE_TILES, rng);
-  const hexSet = new Set(HEX_POSITIONS.map(h => hexKey(h.q, h.r)));
+  const shuffled = shuffleWithRng(RESOURCE_TILES, rngState);
+  const resources = shuffled.result;
+  rngState = shuffled.nextState;
 
   // Create hexes
   const hexes: HexTile[] = HEX_POSITIONS.map((pos, i) => ({
@@ -233,7 +212,10 @@ export function generateBoard(seed?: number): Board {
   let placed = false;
 
   while (!placed && attempts < 100) {
-    tokens = shuffle(NUMBER_TOKENS, rng);
+    const tokenShuffle = shuffleWithRng(NUMBER_TOKENS, rngState);
+    tokens = tokenShuffle.result;
+    rngState = tokenShuffle.nextState;
+
     // Reset
     for (const hex of hexes) hex.numberToken = null;
 
@@ -258,35 +240,35 @@ export function generateBoard(seed?: number): Board {
     }
   }
 
-  // Build vertex and edge maps
-  const vertices = new Map<string, Vertex>();
-  const edges = new Map<string, Edge>();
-  const hexToVertices = new Map<string, string[]>();
-  const hexToEdges = new Map<string, string[]>();
-  const vertexToHexes = new Map<string, string[]>();
-  const vertexToEdges = new Map<string, string[]>();
-  const vertexToVertices = new Map<string, string[]>();
-  const edgeToVertices = new Map<string, [string, string]>();
-  const edgeToHexes = new Map<string, string[]>();
+  // Build vertex and edge maps (using plain objects / Records)
+  const vertices: Record<string, Vertex> = {};
+  const edges: Record<string, Edge> = {};
+  const hexToVertices: Record<string, string[]> = {};
+  const hexToEdges: Record<string, string[]> = {};
+  const vertexToHexes: Record<string, string[]> = {};
+  const vertexToEdges: Record<string, string[]> = {};
+  const vertexToVertices: Record<string, string[]> = {};
+  const edgeToVertices: Record<string, [string, string]> = {};
+  const edgeToHexes: Record<string, string[]> = {};
 
   // Generate vertices and edges for each hex
   for (const hex of hexes) {
     const hk = hexKey(hex.q, hex.r);
-    const verts = hexVertices(hex, hexSet);
-    const edgs = hexEdges(hex, hexSet);
+    const verts = hexVertices(hex);
+    const edgs = hexEdges(hex);
 
-    hexToVertices.set(hk, verts);
-    hexToEdges.set(hk, edgs);
+    hexToVertices[hk] = verts;
+    hexToEdges[hk] = edgs;
 
     // Register vertices
     for (const vid of verts) {
-      if (!vertices.has(vid)) {
-        vertices.set(vid, { id: vid, building: null, owner: null });
+      if (!vertices[vid]) {
+        vertices[vid] = { id: vid, building: null, owner: null };
       }
       // vertex -> hex adjacency
-      const vhexes = vertexToHexes.get(vid) ?? [];
+      const vhexes = vertexToHexes[vid] ?? [];
       if (!vhexes.includes(hk)) vhexes.push(hk);
-      vertexToHexes.set(vid, vhexes);
+      vertexToHexes[vid] = vhexes;
     }
 
     // Register edges
@@ -295,44 +277,45 @@ export function generateBoard(seed?: number): Board {
       const v1 = verts[i];
       const v2 = verts[(i + 1) % 6];
 
-      if (!edges.has(eid)) {
-        edges.set(eid, { id: eid, road: false, owner: null });
+      if (!edges[eid]) {
+        edges[eid] = { id: eid, road: false, owner: null };
       }
 
       // edge -> vertex
-      if (!edgeToVertices.has(eid)) {
-        edgeToVertices.set(eid, [v1, v2]);
+      if (!edgeToVertices[eid]) {
+        edgeToVertices[eid] = [v1, v2];
       }
 
       // vertex -> edge adjacency
       for (const v of [v1, v2]) {
-        const vedges = vertexToEdges.get(v) ?? [];
+        const vedges = vertexToEdges[v] ?? [];
         if (!vedges.includes(eid)) vedges.push(eid);
-        vertexToEdges.set(v, vedges);
+        vertexToEdges[v] = vedges;
       }
 
       // edge -> hex adjacency
-      const ehexes = edgeToHexes.get(eid) ?? [];
+      const ehexes = edgeToHexes[eid] ?? [];
       if (!ehexes.includes(hk)) ehexes.push(hk);
-      edgeToHexes.set(eid, ehexes);
+      edgeToHexes[eid] = ehexes;
     }
   }
 
   // Build vertex -> vertex adjacency (vertices connected by an edge)
-  for (const [, [v1, v2]] of edgeToVertices) {
-    const v1adj = vertexToVertices.get(v1) ?? [];
+  for (const eid of Object.keys(edgeToVertices)) {
+    const [v1, v2] = edgeToVertices[eid];
+    const v1adj = vertexToVertices[v1] ?? [];
     if (!v1adj.includes(v2)) v1adj.push(v2);
-    vertexToVertices.set(v1, v1adj);
+    vertexToVertices[v1] = v1adj;
 
-    const v2adj = vertexToVertices.get(v2) ?? [];
+    const v2adj = vertexToVertices[v2] ?? [];
     if (!v2adj.includes(v1)) v2adj.push(v1);
-    vertexToVertices.set(v2, v2adj);
+    vertexToVertices[v2] = v2adj;
   }
 
   // Generate ports
   const ports: Port[] = PORT_DEFS.map(def => {
     const hex = hexes[def.hexIndex];
-    const verts = hexVertices(hex, hexSet);
+    const verts = hexVertices(hex);
     const v1 = verts[def.edgeDir];
     const v2 = verts[(def.edgeDir + 1) % 6];
     return {
@@ -343,17 +326,20 @@ export function generateBoard(seed?: number): Board {
   });
 
   return {
-    hexes,
-    vertices,
-    edges,
-    ports,
-    hexToVertices,
-    hexToEdges,
-    vertexToHexes,
-    vertexToEdges,
-    vertexToVertices,
-    edgeToVertices,
-    edgeToHexes,
+    board: {
+      hexes,
+      vertices,
+      edges,
+      ports,
+      hexToVertices,
+      hexToEdges,
+      vertexToHexes,
+      vertexToEdges,
+      vertexToVertices,
+      edgeToVertices,
+      edgeToHexes,
+    },
+    rngState,
   };
 }
 
@@ -394,17 +380,13 @@ export function hexCorners(cx: number, cy: number, size: number = HEX_SIZE): { x
  */
 export function vertexPixelPosition(
   vid: string,
-  vertexToHexes: Map<string, string[]>,
+  vertexToHexes: Record<string, string[]>,
   size: number = HEX_SIZE
 ): { x: number; y: number } | null {
   // Parse the hex coords from vertex ID
   // Format: "v:q1,r1|q2,r2|q3,r3"
   const hexParts = vid.slice(2).split('|');
   const hexCoords = hexParts.map(parseHexKey);
-
-  // The vertex position is the average of all hex centers it touches,
-  // but that gives the wrong position. Instead, we need the actual corner.
-  // The vertex is at the point where the hexes meet.
 
   // Convert all hex coords to pixel positions
   const pixelPositions = hexCoords.map(h => hexToPixel(h.q, h.r, size));
@@ -421,11 +403,11 @@ export function vertexPixelPosition(
  */
 export function edgePixelPosition(
   eid: string,
-  edgeToVertices: Map<string, [string, string]>,
-  vertexToHexes: Map<string, string[]>,
+  edgeToVertices: Record<string, [string, string]>,
+  vertexToHexes: Record<string, string[]>,
   size: number = HEX_SIZE
 ): { x: number; y: number; angle: number } | null {
-  const verts = edgeToVertices.get(eid);
+  const verts = edgeToVertices[eid];
   if (!verts) return null;
 
   const p1 = vertexPixelPosition(verts[0], vertexToHexes, size);

@@ -1,9 +1,9 @@
 import { useRef, useEffect, useState } from 'react';
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
-import type { GameState, HexTile, Resource, PlayerColor } from '@settlement3/shared';
+import type { GameState, GameAction, ActionResult, HexTile, Resource, PlayerColor } from '@settlement3/shared';
 import { hexToPixel, hexCorners, vertexPixelPosition, hexKey } from '@settlement3/shared';
 import { useGameState, useDispatch } from '../hooks/use-game';
-import { useBuildMode } from '../hooks/use-build-mode';
+import { useBuildMode, type BuildMode } from '../hooks/use-build-mode';
 import {
   getValidSettlementVertices,
   getValidRoadEdges,
@@ -33,6 +33,8 @@ interface BoardRendererProps {
   height: number;
 }
 
+// TODO (Issue #9): Full re-render every state change. Consider diffing state
+// and only updating changed elements, or using a more granular subscription model.
 export function BoardRenderer({ width, height }: BoardRendererProps) {
   const canvasRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
@@ -104,14 +106,16 @@ export function BoardRenderer({ width, height }: BoardRendererProps) {
 // Rendering
 // ============================================================
 
+type DispatchFn = (action: GameAction, player?: number) => ActionResult;
+
 function renderBoard(
   app: Application,
   state: GameState,
-  dispatchAction: (action: any, player?: number) => any,
+  dispatchAction: DispatchFn,
   width: number,
   height: number,
-  buildMode: string | null,
-  setBuildMode: (mode: any) => void
+  buildMode: BuildMode,
+  setBuildMode: (mode: BuildMode) => void
 ) {
   const { turnPhase } = state;
 
@@ -126,7 +130,7 @@ function renderBoard(
   else if (turnPhase === 'post_roll' && buildMode === 'city') interactionMode = 'place_city';
 
   // Wrap dispatch to clear build mode after successful placement
-  const wrappedDispatch = (action: any, player?: number) => {
+  const wrappedDispatch: DispatchFn = (action, player?) => {
     const result = dispatchAction(action, player);
     if (result.success && (
       action.type === 'PLACE_SETTLEMENT' ||
@@ -166,7 +170,7 @@ function drawHex(
   container: Container,
   hex: HexTile,
   state: GameState,
-  dispatchAction: (action: any, player?: number) => any,
+  dispatchAction: DispatchFn,
   interactionMode: string
 ) {
   const { x, y } = hexToPixel(hex.q, hex.r, HEX_SIZE);
@@ -300,7 +304,7 @@ function drawPorts(container: Container, state: GameState) {
 function drawEdges(
   container: Container,
   state: GameState,
-  dispatchAction: (action: any, player?: number) => any,
+  dispatchAction: DispatchFn,
   interactionMode: string
 ) {
   const currentPlayer = state.currentPlayerIndex;
@@ -308,8 +312,9 @@ function drawEdges(
     ? new Set(getValidRoadEdges(state, currentPlayer))
     : new Set<string>();
 
-  for (const [eid, edge] of state.board.edges) {
-    const verts = state.board.edgeToVertices.get(eid);
+  for (const eid of Object.keys(state.board.edges)) {
+    const edge = state.board.edges[eid];
+    const verts = state.board.edgeToVertices[eid];
     if (!verts) continue;
     const p1 = vertexPixelPosition(verts[0], state.board.vertexToHexes, HEX_SIZE);
     const p2 = vertexPixelPosition(verts[1], state.board.vertexToHexes, HEX_SIZE);
@@ -368,7 +373,7 @@ function drawEdges(
 function drawVertices(
   container: Container,
   state: GameState,
-  dispatchAction: (action: any, player?: number) => any,
+  dispatchAction: DispatchFn,
   interactionMode: string
 ) {
   const currentPlayer = state.currentPlayerIndex;
@@ -379,7 +384,8 @@ function drawVertices(
     ? new Set(getValidCityVertices(state, currentPlayer))
     : new Set<string>();
 
-  for (const [vid, vertex] of state.board.vertices) {
+  for (const vid of Object.keys(state.board.vertices)) {
+    const vertex = state.board.vertices[vid];
     const pos = vertexPixelPosition(vid, state.board.vertexToHexes, HEX_SIZE);
     if (!pos) continue;
 
