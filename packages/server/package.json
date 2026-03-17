@@ -11,7 +11,8 @@
   "dependencies": {
     "@settlement3/shared": "workspace:*",
     "@colyseus/core": "^0.17.39",
-    "@colyseus/ws-transport": "^0.17.9"
+    "@colyseus/ws-transport": "^0.17.9",
+    "ioredis": "^5.4.2"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

@@ -9,6 +9,7 @@ import {
   createInitialState,
   dispatch,
 } from '@settlement3/shared';
+import { saveSnapshot, deleteSnapshot, type GameSnapshot } from './snapshot.js';
 
 /**
  * Strip fields that should not be broadcast to clients:
@@ -40,6 +41,11 @@ export class CatanRoom extends Room {
   // Map playerIndex → reconnection reservation (for allowReconnection)
   private reconnections: Map<number, { resolve: () => void }> = new Map();
 
+  // Snapshot persistence
+  private snapshotInterval: ReturnType<typeof setInterval> | null = null;
+  private dirty = false;
+  private createdAt: number = Date.now();
+
   onCreate(options: CreateRoomOptions) {
     const maxPlayers = options.maxPlayers ?? DEFAULT_GAME_CONFIG.maxPlayers;
     this.maxSeats = maxPlayers;
@@ -64,6 +70,18 @@ export class CatanRoom extends Room {
     this.onMessage('action', (client: Client, message: { action: GameAction }) => {
       this.handleAction(client, message);
     });
+
+    // Start periodic snapshot saves (every 30 seconds)
+    this.createdAt = Date.now();
+    this.snapshotInterval = setInterval(() => {
+      if (this.dirty) {
+        this.persistSnapshot();
+        this.dirty = false;
+      }
+    }, 30_000);
+
+    // Mark dirty so the initial state gets saved on the first interval
+    this.dirty = true;
   }
 
   onJoin(client: Client, options: JoinRoomOptions) {
@@ -219,6 +237,7 @@ export class CatanRoom extends Room {
 
     // Update server state
     this.gameState = result.state;
+    this.dirty = true;
 
     // Broadcast sanitized state to all clients
     this.broadcast('state', sanitizeState(this.gameState));
@@ -237,10 +256,43 @@ export class CatanRoom extends Room {
     }
   }
 
-  onDispose() {
+  async onDispose() {
     if (this.disposalTimeout) {
       clearTimeout(this.disposalTimeout);
     }
+    if (this.snapshotInterval) {
+      clearInterval(this.snapshotInterval);
+      this.snapshotInterval = null;
+    }
+
+    // Delete the snapshot — game is done
+    await deleteSnapshot(this.roomId);
+  }
+
+  // ---- Snapshot persistence ----
+
+  buildSnapshot(): GameSnapshot {
+    const seats: GameSnapshot['seats'] = [];
+    for (const seat of this.seats.values()) {
+      seats.push({
+        sessionId: seat.sessionId,
+        playerIndex: seat.playerIndex,
+        displayName: seat.displayName,
+        connected: seat.connected,
+      });
+    }
+    return {
+      gameState: this.gameState,
+      seats,
+      roomCode: this.roomCode,
+      maxSeats: this.maxSeats,
+      createdAt: this.createdAt,
+      updatedAt: Date.now(),
+    };
+  }
+
+  async persistSnapshot(): Promise<void> {
+    await saveSnapshot(this.roomId, this.buildSnapshot());
   }
 
   // ---- Helpers ----
