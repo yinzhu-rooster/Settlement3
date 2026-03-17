@@ -11,5 +11,11 @@
     "turbo": "^2.4.0",
     "typescript": "^5.7.0"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "@colyseus/core": "^0.17.39",
+      "@colyseus/schema": "^4.0.7"
+    }
+  }
 }

@@ -9,26 +9,27 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@settlement3/shared": "workspace:*",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "pixi.js": "^8.6.0",
     "@pixi/react": "^8.0.0",
     "@radix-ui/react-dialog": "^1.1.0",
     "@radix-ui/react-popover": "^1.1.0",
-    "@radix-ui/react-tooltip": "^1.1.0",
-    "@radix-ui/react-toast": "^1.2.0",
+    "@radix-ui/react-slot": "^1.1.0",
     "@radix-ui/react-tabs": "^1.1.0",
-    "@radix-ui/react-slot": "^1.1.0"
+    "@radix-ui/react-toast": "^1.2.0",
+    "@radix-ui/react-tooltip": "^1.1.0",
+    "@settlement3/shared": "workspace:*",
+    "colyseus.js": "^0.16.22",
+    "pixi.js": "^8.6.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^4.0.0",
-    "@tailwindcss/vite": "^4.0.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   }

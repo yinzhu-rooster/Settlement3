@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useGameState, useDispatch } from '../hooks/use-game';
+import { useGameState, useDispatch, usePlayerIndex, useIsMyTurn } from '../hooks/use-game';
 import { useBuildMode } from '../hooks/use-build-mode';
 import { BUILDING_COSTS, ALL_RESOURCES, type Resource, type DevCardType } from '@settlement3/shared';
 import { ResourceBar } from './resource-bar';
@@ -21,7 +21,10 @@ export function ActionBar() {
   const [toast, setToast] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  const player = state.players[state.currentPlayerIndex];
+  const myIndex = usePlayerIndex();
+  const isMyTurn = useIsMyTurn();
+  const player = state.players[myIndex];
+  const currentPlayer = state.players[state.currentPlayerIndex];
   const isSetup = state.gamePhase === 'setup_1' || state.gamePhase === 'setup_2';
   const isMainPhase = state.gamePhase === 'main';
 
@@ -36,13 +39,20 @@ export function ActionBar() {
     return ALL_RESOURCES.every(r => (player.resources[r] ?? 0) >= (costs[r] ?? 0));
   }
 
-  const showPostRoll = isMainPhase && state.turnPhase === 'post_roll';
+  const showPostRoll = isMyTurn && isMainPhase && state.turnPhase === 'post_roll';
   const hasPlayableDevCards =
     player.devCards.filter(d => d.type !== 'victoryPoint' && d.turnBought < state.turnNumber).length > 0;
 
   return (
     <>
       <div className={`absolute bottom-0 left-0 right-0 z-10 bg-stone-900/90 backdrop-blur-sm text-white ${expanded ? 'bottom-sheet-open' : 'sm:bottom-sheet-open bottom-sheet-closed'}`}>
+        {/* "Waiting for..." banner when it's not our turn (online) */}
+        {!isMyTurn && (
+          <div className="px-4 py-2 bg-stone-800/80 border-b border-white/5 text-center text-sm text-stone-400">
+            Waiting for <span className="text-white font-medium">{currentPlayer.name}</span>...
+          </div>
+        )}
+
         {/* Mobile drag handle / toggle */}
         <button
           onClick={() => setExpanded(!expanded)}
@@ -54,7 +64,7 @@ export function ActionBar() {
 
         {/* Collapsed mobile bar: key actions always visible */}
         <div className="sm:hidden flex items-center justify-between px-3 py-1.5">
-          {isMainPhase && state.turnPhase === 'pre_roll' && (
+          {isMyTurn && isMainPhase && state.turnPhase === 'pre_roll' && (
             <button
               onClick={() => doAction({ type: 'ROLL_DICE' })}
               className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg font-medium text-sm transition-colors"
@@ -77,7 +87,7 @@ export function ActionBar() {
           )}
           {isSetup && (
             <div className="text-xs text-stone-400">
-              {player.name}'s turn
+              {isMyTurn ? 'Your turn' : `${currentPlayer.name}'s turn`}
             </div>
           )}
           <ResourceBar />
@@ -93,7 +103,7 @@ export function ActionBar() {
             {/* Action buttons */}
             <div className="flex flex-wrap items-center gap-2">
               {/* Roll Dice -- hidden on mobile collapsed since it's in the collapsed bar */}
-              {isMainPhase && state.turnPhase === 'pre_roll' && (
+              {isMyTurn && isMainPhase && state.turnPhase === 'pre_roll' && (
                 <button
                   onClick={() => doAction({ type: 'ROLL_DICE' })}
                   className="hidden sm:inline-flex px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg font-medium text-sm transition-colors"
@@ -182,7 +192,7 @@ export function ActionBar() {
               )}
 
               {/* Dev card pre-roll */}
-              {isMainPhase && state.turnPhase === 'pre_roll' &&
+              {isMyTurn && isMainPhase && state.turnPhase === 'pre_roll' &&
                 hasPlayableDevCards &&
                 player.devCardsPlayedThisTurn === 0 && (
                   <button
@@ -220,7 +230,7 @@ export function ActionBar() {
 
               {isSetup && (
                 <div className="hidden sm:block text-xs text-stone-400">
-                  {player.name}'s turn
+                  {isMyTurn ? 'Your turn' : `${currentPlayer.name}'s turn`}
                 </div>
               )}
             </div>

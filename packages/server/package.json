@@ -6,12 +6,12 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "tsx src/index.ts"
   },
   "dependencies": {
     "@settlement3/shared": "workspace:*",
-    "colyseus": "^0.15.0",
-    "@colyseus/ws-transport": "^0.15.0"
+    "@colyseus/core": "^0.17.39",
+    "@colyseus/ws-transport": "^0.17.9"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

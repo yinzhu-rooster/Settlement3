@@ -1,4 +1,4 @@
-import { useGameState } from '../hooks/use-game';
+import { useGameState, usePlayerIndex } from '../hooks/use-game';
 import type { PlayerColor } from '@settlement3/shared';
 
 const COLOR_CLASSES: Record<PlayerColor, string> = {
@@ -18,6 +18,7 @@ const COLOR_TEXT: Record<PlayerColor, string> = {
 export function TopBar() {
   const state = useGameState();
   const { players, currentPlayerIndex, gamePhase, turnPhase, turnNumber, diceRoll, winner } = state;
+  const myIndex = usePlayerIndex();
 
   const currentPlayer = players[currentPlayerIndex];
 
@@ -25,9 +26,13 @@ export function TopBar() {
     <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-2 sm:px-4 py-1.5 sm:py-2 bg-stone-900/80 backdrop-blur-sm text-white">
       {/* Mobile: current player + phase only */}
       <div className="flex sm:hidden items-center gap-2 min-w-0">
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/15 ring-1 ring-white/30 shrink-0">
+        <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/15 ring-1 shrink-0 ${
+          currentPlayerIndex === myIndex ? 'ring-amber-400/60' : 'ring-white/30'
+        }`}>
           <div className={`w-3 h-3 rounded-full ${COLOR_CLASSES[currentPlayer.color]}`} />
-          <span className="text-xs font-medium truncate max-w-[4rem]">{currentPlayer.name}</span>
+          <span className="text-xs font-medium truncate max-w-[4rem]">
+            {currentPlayer.name}{currentPlayerIndex === myIndex ? ' (you)' : ''}
+          </span>
           <span className={`text-xs font-bold ${COLOR_TEXT[currentPlayer.color]}`}>{currentPlayer.victoryPoints} VP</span>
         </div>
 
@@ -36,8 +41,8 @@ export function TopBar() {
           {players.map((p, i) => {
             if (i === currentPlayerIndex) return null;
             return (
-              <div key={i} className="flex items-center gap-0.5 opacity-60">
-                <div className={`w-2 h-2 rounded-full ${COLOR_CLASSES[p.color]}`} />
+              <div key={i} className={`flex items-center gap-0.5 ${i === myIndex ? 'opacity-80' : 'opacity-60'}`}>
+                <div className={`w-2 h-2 rounded-full ${COLOR_CLASSES[p.color]} ${i === myIndex ? 'ring-1 ring-amber-400/60' : ''}`} />
                 <span className="text-[10px] tabular-nums">{p.victoryPoints}</span>
               </div>
             );
@@ -47,18 +52,24 @@ export function TopBar() {
 
       {/* Desktop: full player indicators */}
       <div className="hidden sm:flex items-center gap-3">
-        {players.map((p, i) => (
-          <div
-            key={i}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-all ${
-              i === currentPlayerIndex ? 'bg-white/15 ring-1 ring-white/30' : 'opacity-60'
-            }`}
-          >
-            <div className={`w-3 h-3 rounded-full ${COLOR_CLASSES[p.color]}`} />
-            <span className="text-xs font-medium">{p.name}</span>
-            <span className={`text-xs font-bold ${COLOR_TEXT[p.color]}`}>{p.victoryPoints} VP</span>
-          </div>
-        ))}
+        {players.map((p, i) => {
+          const isCurrent = i === currentPlayerIndex;
+          const isMe = i === myIndex;
+          return (
+            <div
+              key={i}
+              className={`flex items-center gap-1.5 px-2 py-1 rounded-md transition-all ${
+                isCurrent ? 'bg-white/15 ring-1 ring-white/30' : 'opacity-60'
+              } ${isMe ? 'ring-1 ring-amber-400/60' : ''}`}
+            >
+              <div className={`w-3 h-3 rounded-full ${COLOR_CLASSES[p.color]}`} />
+              <span className="text-xs font-medium">
+                {p.name}{isMe ? ' (you)' : ''}
+              </span>
+              <span className={`text-xs font-bold ${COLOR_TEXT[p.color]}`}>{p.victoryPoints} VP</span>
+            </div>
+          );
+        })}
       </div>
 
       {/* Game info */}

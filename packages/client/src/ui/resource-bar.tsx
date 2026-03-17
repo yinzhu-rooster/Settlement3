@@ -1,5 +1,5 @@
 import { ALL_RESOURCES, type Resource } from '@settlement3/shared';
-import { useGameState } from '../hooks/use-game';
+import { useGameState, usePlayerIndex } from '../hooks/use-game';
 
 const RESOURCE_ICONS: Record<Resource, string> = {
   wood: '🪵',
@@ -19,7 +19,8 @@ const RESOURCE_COLORS: Record<Resource, string> = {
 
 export function ResourceBar() {
   const state = useGameState();
-  const player = state.players[state.currentPlayerIndex];
+  const myIndex = usePlayerIndex();
+  const player = state.players[myIndex];
 
   return (
     <div className="flex items-center gap-1 sm:gap-2">
