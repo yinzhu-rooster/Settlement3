@@ -198,6 +198,9 @@ export class OnlineGameService implements GameService {
   }
 
   private setupListeners(): void {
+    // Remove any previously attached listeners to prevent duplication on reconnect
+    this.room.removeAllListeners();
+
     // Persist reconnection token
     this.saveReconnectData();
 

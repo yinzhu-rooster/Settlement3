@@ -333,7 +333,10 @@ function renderBoard(
     return result;
   };
 
-  // Clear previous render
+  // Clear previous render — destroy Graphics objects to prevent memory leaks
+  for (const child of app.stage.children) {
+    child.destroy({ children: true });
+  }
   app.stage.removeChildren();
 
   const boardContainer = new Container();

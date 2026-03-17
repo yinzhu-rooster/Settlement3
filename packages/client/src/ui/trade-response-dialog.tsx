@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { ALL_RESOURCES, type Resource, type TradeOffer, type PlayerColor } from '@settlement3/shared';
 import { useGameState, useDispatch } from '../hooks/use-game';
+import { GameDialog } from './game-dialog';
 
 const RESOURCE_ICONS: Record<Resource, string> = {
-  wood: '🪵', brick: '🧱', sheep: '🐑', wheat: '🌾', ore: '⛏️',
+  wood: '\u{1FAB5}', brick: '\u{1F9F1}', sheep: '\u{1F411}', wheat: '\u{1F33E}', ore: '\u26CF\uFE0F',
 };
 
 const COLOR_BG: Record<PlayerColor, string> = {
@@ -47,25 +48,25 @@ export function TradeResponseDialog() {
   const respondingPlayer = eligiblePlayers[0];
 
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60">
-      <div className="bg-stone-800 rounded-xl p-5 w-96 shadow-xl border border-white/10">
-        <TradeOfferCard
-          trade={trade}
-          offererName={offerer.name}
-          offererColor={offerer.color}
-          respondingPlayer={respondingPlayer}
-          onAccept={() => dispatchAction({ type: 'TRADE_ACCEPT', tradeId: trade.id }, respondingPlayer.id)}
-          onReject={() => dispatchAction({ type: 'TRADE_REJECT', tradeId: trade.id }, respondingPlayer.id)}
-          onCounter={(offering, requesting) => dispatchAction({ type: 'TRADE_COUNTER', tradeId: trade.id, offering, requesting }, respondingPlayer.id)}
-        />
-      </div>
-    </div>
+    <GameDialog
+      open
+      title={`${offerer.name} offers a trade`}
+      className="w-96"
+    >
+      <TradeOfferCard
+        trade={trade}
+        offererColor={offerer.color}
+        respondingPlayer={respondingPlayer}
+        onAccept={() => dispatchAction({ type: 'TRADE_ACCEPT', tradeId: trade.id }, respondingPlayer.id)}
+        onReject={() => dispatchAction({ type: 'TRADE_REJECT', tradeId: trade.id }, respondingPlayer.id)}
+        onCounter={(offering, requesting) => dispatchAction({ type: 'TRADE_COUNTER', tradeId: trade.id, offering, requesting }, respondingPlayer.id)}
+      />
+    </GameDialog>
   );
 }
 
 function TradeOfferCard({
   trade,
-  offererName,
   offererColor,
   respondingPlayer,
   onAccept,
@@ -73,7 +74,6 @@ function TradeOfferCard({
   onCounter,
 }: {
   trade: TradeOffer;
-  offererName: string;
   offererColor: PlayerColor;
   respondingPlayer: { id: number; name: string; color: PlayerColor; resources: Record<Resource, number> };
   onAccept: () => void;
@@ -117,13 +117,6 @@ function TradeOfferCard({
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <div className={`w-3 h-3 rounded-full ${COLOR_BG[offererColor]}`} />
-        <h3 className="font-semibold text-white text-sm">
-          {offererName} offers a trade
-        </h3>
-      </div>
-
       {/* Trade details */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="bg-stone-700/50 rounded-lg p-2.5">

@@ -85,7 +85,8 @@ export class CatanRoom extends Room {
   }
 
   onJoin(client: Client, options: JoinRoomOptions) {
-    const displayName = options?.displayName ?? `Player ${this.seats.size + 1}`;
+    const rawName = options?.displayName ?? `Player ${this.seats.size + 1}`;
+    const displayName = rawName.slice(0, 32).replace(/[^\w\s\-]/g, '').trim() || `Player ${this.seats.size + 1}`;
 
     // Assign the next available seat
     const takenIndices = new Set<number>();
@@ -223,8 +224,11 @@ export class CatanRoom extends Room {
       return;
     }
 
-    // Validate the acting player matches their seat (except for actions any player can take)
     const playerIndex = seat.playerIndex;
+    if (!Number.isInteger(playerIndex) || playerIndex < 0 || playerIndex >= this.maxSeats) {
+      client.send('error', { message: 'Invalid seat assignment' });
+      return;
+    }
 
     // Dispatch through the shared rules engine
     const result = dispatch(this.gameState, action, playerIndex);
@@ -235,12 +239,23 @@ export class CatanRoom extends Room {
       return;
     }
 
-    // Update server state
-    this.gameState = result.state;
+    // Update server state — prepare sanitized snapshot before mutating this.gameState
+    // to avoid a race where another message arrives between assignment and broadcast
+    const newState = result.state;
+    const sanitized = sanitizeState(newState);
+    this.gameState = newState;
     this.dirty = true;
 
     // Broadcast sanitized state to all clients
-    this.broadcast('state', sanitizeState(this.gameState));
+    this.broadcast('state', sanitized);
+
+    // Keep lobby metadata fresh
+    this.setMetadata({
+      roomCode: this.roomCode,
+      playerCount: this.connectedCount(),
+      maxPlayers: this.maxSeats,
+      hostName: this.getHostName(),
+    });
 
     // Check for game end
     if (this.gameState.winner !== null) {
@@ -292,7 +307,13 @@ export class CatanRoom extends Room {
   }
 
   async persistSnapshot(): Promise<void> {
-    await saveSnapshot(this.roomId, this.buildSnapshot());
+    await Promise.race([
+      saveSnapshot(this.roomId, this.buildSnapshot()),
+      new Promise<void>((resolve) => setTimeout(() => {
+        console.warn(`[CatanRoom] Snapshot save timed out for game:${this.roomId}`);
+        resolve();
+      }, 5000)),
+    ]);
   }
 
   // ---- Helpers ----

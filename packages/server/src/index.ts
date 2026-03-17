@@ -110,11 +110,12 @@ function serveStaticFile(req: IncomingMessage, res: ServerResponse): boolean {
 
 // Create HTTP server with CORS and health endpoint
 const httpServer = createServer((req, res) => {
-  // CORS headers (not needed for same-origin in production, but harmless)
+  // CORS headers — only allow listed origins
   const origin = req.headers.origin ?? '';
-  if (isProduction || allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  } else {
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  } else if (!isProduction) {
+    // In dev, fall back to the first allowed origin for convenience
     res.setHeader('Access-Control-Allow-Origin', allowedOrigins[0]);
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -224,7 +225,14 @@ async function gracefulShutdown(signal: string) {
       }
     }
 
-    await Promise.all(savePromises);
+    // Wait for all saves with a timeout to prevent hanging on unresponsive Redis
+    await Promise.race([
+      Promise.all(savePromises),
+      new Promise<void>((resolve) => setTimeout(() => {
+        console.warn('[Shutdown] Snapshot save timed out after 5s');
+        resolve();
+      }, 5000)),
+    ]);
     console.log(`[Shutdown] Saved ${savePromises.length} game(s)`);
   } catch (err) {
     console.error('[Shutdown] Error saving games:', (err as Error).message);

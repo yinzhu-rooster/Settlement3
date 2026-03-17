@@ -708,15 +708,13 @@ function advanceSetup(state: GameState): void {
   } else if (state.gamePhase === 'setup_2') {
     if (state.currentPlayerIndex > 0) {
       state.currentPlayerIndex--;
+      state.turnPhase = 'setup_settlement';
     } else {
       // Setup complete, begin main phase
       state.gamePhase = 'main';
       state.turnPhase = 'pre_roll';
       state.turnNumber = 1;
       state.currentPlayerIndex = 0;
-    }
-    if (state.gamePhase === 'setup_2') {
-      state.turnPhase = 'setup_settlement';
     }
   }
 }
@@ -907,6 +905,11 @@ function handleTradeOffer(
   if (state.turnPhase !== 'post_roll') return { success: false, error: 'Can only trade after rolling' };
   if (playerIdx !== state.currentPlayerIndex) return { success: false, error: 'Only the active player can offer trades' };
 
+  // Validate the trade has something on both sides and isn't a no-op
+  const hasOffering = ALL_RESOURCES.some(r => (offering[r] ?? 0) > 0);
+  const hasRequesting = ALL_RESOURCES.some(r => (requesting[r] ?? 0) > 0);
+  if (!hasOffering || !hasRequesting) return { success: false, error: 'Trade must offer and request at least one resource' };
+
   const player = state.players[playerIdx];
   if (!hasResources(player, offering)) return { success: false, error: 'Not enough resources to offer' };
 
@@ -1003,6 +1006,10 @@ function handleTradeCounter(
   const player = state.players[playerIdx];
   if (!hasResources(player, offering)) return { success: false, error: 'Not enough resources for counter-offer' };
 
+  // Close the original trade
+  originalTrade.status = 'rejected';
+  originalTrade.respondedBy[playerIdx] = 'rejected';
+
   // Create new counter-offer with deterministic ID
   const { value, nextState } = nextRng(state.rngState);
   state.rngState = nextState;
@@ -1024,6 +1031,7 @@ function handleTradeCounter(
 function handleBankTrade(state: GameState, playerIdx: number, giving: Resource, receiving: Resource): ActionResult {
   if (playerIdx !== state.currentPlayerIndex) return { success: false, error: 'Not your turn' };
   if (state.turnPhase !== 'post_roll') return { success: false, error: 'Can only trade after rolling' };
+  if (giving === receiving) return { success: false, error: 'Cannot trade a resource for itself' };
 
   const player = state.players[playerIdx];
 
@@ -1048,6 +1056,7 @@ function handleBankTrade(state: GameState, playerIdx: number, giving: Resource, 
 function handleYearOfPlentyPick(state: GameState, playerIdx: number, resources: [Resource, Resource]): ActionResult {
   if (playerIdx !== state.currentPlayerIndex) return { success: false, error: 'Not your turn' };
   if (state.turnPhase !== 'year_of_plenty') return { success: false, error: 'Not the right time' };
+  if (resources[0] === resources[1]) return { success: false, error: 'Must pick two different resources' };
 
   state.players[playerIdx].resources[resources[0]]++;
   state.players[playerIdx].resources[resources[1]]++;

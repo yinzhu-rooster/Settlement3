@@ -75,10 +75,14 @@ export function ActionBar() {
           {showPostRoll && (
             <button
               onClick={() => {
-                doAction({ type: 'END_TURN' });
-                setBuildMode(null);
-                setShowTrade(false);
-                setShowDevCards(false);
+                const result = dispatchAction({ type: 'END_TURN' });
+                if (result.success) {
+                  setBuildMode(null);
+                  setShowTrade(false);
+                  setShowDevCards(false);
+                } else {
+                  setToast(result.error);
+                }
               }}
               className="px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg font-medium text-sm transition-colors"
             >
@@ -216,11 +220,15 @@ export function ActionBar() {
               {showPostRoll && (
                 <button
                   onClick={() => {
-                    doAction({ type: 'END_TURN' });
-                    setBuildMode(null);
-                    setShowTrade(false);
-                    setShowDevCards(false);
-                    setExpanded(false);
+                    const result = dispatchAction({ type: 'END_TURN' });
+                    if (result.success) {
+                      setBuildMode(null);
+                      setShowTrade(false);
+                      setShowDevCards(false);
+                      setExpanded(false);
+                    } else {
+                      setToast(result.error);
+                    }
                   }}
                   className="hidden sm:inline-flex px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg font-medium text-sm transition-colors"
                 >
