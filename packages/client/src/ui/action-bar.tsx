@@ -19,6 +19,7 @@ export function ActionBar() {
   const [showTrade, setShowTrade] = useState(false);
   const [showDevCards, setShowDevCards] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
   const player = state.players[state.currentPlayerIndex];
   const isSetup = state.gamePhase === 'setup_1' || state.gamePhase === 'setup_2';
@@ -35,149 +36,194 @@ export function ActionBar() {
     return ALL_RESOURCES.every(r => (player.resources[r] ?? 0) >= (costs[r] ?? 0));
   }
 
+  const showPostRoll = isMainPhase && state.turnPhase === 'post_roll';
+  const hasPlayableDevCards =
+    player.devCards.filter(d => d.type !== 'victoryPoint' && d.turnBought < state.turnNumber).length > 0;
+
   return (
     <>
-      <div className="absolute bottom-0 left-0 right-0 z-10 bg-stone-900/90 backdrop-blur-sm text-white">
-        <div className="px-4 py-2 border-b border-white/10">
+      <div className={`absolute bottom-0 left-0 right-0 z-10 bg-stone-900/90 backdrop-blur-sm text-white ${expanded ? 'bottom-sheet-open' : 'sm:bottom-sheet-open bottom-sheet-closed'}`}>
+        {/* Mobile drag handle / toggle */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="sm:hidden w-full flex flex-col items-center py-1.5 min-h-0"
+          aria-label={expanded ? 'Collapse action bar' : 'Expand action bar'}
+        >
+          <div className="w-10 h-1 rounded-full bg-white/30" />
+        </button>
+
+        {/* Collapsed mobile bar: key actions always visible */}
+        <div className="sm:hidden flex items-center justify-between px-3 py-1.5">
+          {isMainPhase && state.turnPhase === 'pre_roll' && (
+            <button
+              onClick={() => doAction({ type: 'ROLL_DICE' })}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg font-medium text-sm transition-colors"
+            >
+              Roll Dice
+            </button>
+          )}
+          {showPostRoll && (
+            <button
+              onClick={() => {
+                doAction({ type: 'END_TURN' });
+                setBuildMode(null);
+                setShowTrade(false);
+                setShowDevCards(false);
+              }}
+              className="px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg font-medium text-sm transition-colors"
+            >
+              End Turn
+            </button>
+          )}
+          {isSetup && (
+            <div className="text-xs text-stone-400">
+              {player.name}'s turn
+            </div>
+          )}
           <ResourceBar />
         </div>
 
-        <div className="flex items-center justify-between px-4 py-2">
-          {/* Action buttons */}
-          <div className="flex items-center gap-2">
-            {/* Roll Dice */}
-            {isMainPhase && state.turnPhase === 'pre_roll' && (
-              <button
-                onClick={() => doAction({ type: 'ROLL_DICE' })}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg font-medium text-sm transition-colors"
-              >
-                Roll Dice
-              </button>
-            )}
+        {/* Expanded content (always visible on sm+, toggled on mobile) */}
+        <div className={`${expanded ? 'block' : 'hidden'} sm:block`}>
+          <div className="hidden sm:block px-4 py-2 border-b border-white/10">
+            <ResourceBar />
+          </div>
 
-            {/* Build buttons (main phase, post-roll) */}
-            {isMainPhase && state.turnPhase === 'post_roll' && (
-              <>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between px-3 sm:px-4 py-2 gap-2 sm:gap-0">
+            {/* Action buttons */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Roll Dice -- hidden on mobile collapsed since it's in the collapsed bar */}
+              {isMainPhase && state.turnPhase === 'pre_roll' && (
                 <button
-                  onClick={() => setBuildMode(buildMode === 'road' ? null : 'road')}
-                  disabled={!canAfford(BUILDING_COSTS.road)}
-                  className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                    buildMode === 'road'
-                      ? 'bg-blue-600 ring-2 ring-blue-400'
-                      : canAfford(BUILDING_COSTS.road)
-                        ? 'bg-stone-700 hover:bg-stone-600'
+                  onClick={() => doAction({ type: 'ROLL_DICE' })}
+                  className="hidden sm:inline-flex px-4 py-2 bg-amber-600 hover:bg-amber-500 rounded-lg font-medium text-sm transition-colors"
+                >
+                  Roll Dice
+                </button>
+              )}
+
+              {/* Build buttons (main phase, post-roll) */}
+              {showPostRoll && (
+                <>
+                  <button
+                    onClick={() => setBuildMode(buildMode === 'road' ? null : 'road')}
+                    disabled={!canAfford(BUILDING_COSTS.road)}
+                    className={`px-3 py-2 sm:py-1.5 rounded-lg text-sm transition-colors ${
+                      buildMode === 'road'
+                        ? 'bg-blue-600 ring-2 ring-blue-400'
+                        : canAfford(BUILDING_COSTS.road)
+                          ? 'bg-stone-700 hover:bg-stone-600'
+                          : 'bg-stone-800 opacity-40 cursor-not-allowed'
+                    }`}
+                  >
+                    Road
+                  </button>
+                  <button
+                    onClick={() => setBuildMode(buildMode === 'settlement' ? null : 'settlement')}
+                    disabled={!canAfford(BUILDING_COSTS.settlement)}
+                    className={`px-3 py-2 sm:py-1.5 rounded-lg text-sm transition-colors ${
+                      buildMode === 'settlement'
+                        ? 'bg-blue-600 ring-2 ring-blue-400'
+                        : canAfford(BUILDING_COSTS.settlement)
+                          ? 'bg-stone-700 hover:bg-stone-600'
+                          : 'bg-stone-800 opacity-40 cursor-not-allowed'
+                    }`}
+                  >
+                    Settlement
+                  </button>
+                  <button
+                    onClick={() => setBuildMode(buildMode === 'city' ? null : 'city')}
+                    disabled={!canAfford(BUILDING_COSTS.city)}
+                    className={`px-3 py-2 sm:py-1.5 rounded-lg text-sm transition-colors ${
+                      buildMode === 'city'
+                        ? 'bg-blue-600 ring-2 ring-blue-400'
+                        : canAfford(BUILDING_COSTS.city)
+                          ? 'bg-stone-700 hover:bg-stone-600'
+                          : 'bg-stone-800 opacity-40 cursor-not-allowed'
+                    }`}
+                  >
+                    City
+                  </button>
+                  <button
+                    onClick={() => doAction({ type: 'BUY_DEV_CARD' })}
+                    disabled={!canAfford(BUILDING_COSTS.devCard)}
+                    className={`px-3 py-2 sm:py-1.5 rounded-lg text-sm transition-colors ${
+                      canAfford(BUILDING_COSTS.devCard)
+                        ? 'bg-purple-700 hover:bg-purple-600'
                         : 'bg-stone-800 opacity-40 cursor-not-allowed'
-                  }`}
-                >
-                  Road
-                </button>
-                <button
-                  onClick={() => setBuildMode(buildMode === 'settlement' ? null : 'settlement')}
-                  disabled={!canAfford(BUILDING_COSTS.settlement)}
-                  className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                    buildMode === 'settlement'
-                      ? 'bg-blue-600 ring-2 ring-blue-400'
-                      : canAfford(BUILDING_COSTS.settlement)
-                        ? 'bg-stone-700 hover:bg-stone-600'
-                        : 'bg-stone-800 opacity-40 cursor-not-allowed'
-                  }`}
-                >
-                  Settlement
-                </button>
-                <button
-                  onClick={() => setBuildMode(buildMode === 'city' ? null : 'city')}
-                  disabled={!canAfford(BUILDING_COSTS.city)}
-                  className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                    buildMode === 'city'
-                      ? 'bg-blue-600 ring-2 ring-blue-400'
-                      : canAfford(BUILDING_COSTS.city)
-                        ? 'bg-stone-700 hover:bg-stone-600'
-                        : 'bg-stone-800 opacity-40 cursor-not-allowed'
-                  }`}
-                >
-                  City
-                </button>
-                <button
-                  onClick={() => doAction({ type: 'BUY_DEV_CARD' })}
-                  disabled={!canAfford(BUILDING_COSTS.devCard)}
-                  className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                    canAfford(BUILDING_COSTS.devCard)
-                      ? 'bg-purple-700 hover:bg-purple-600'
-                      : 'bg-stone-800 opacity-40 cursor-not-allowed'
-                  }`}
-                >
-                  Buy Dev Card
-                </button>
+                    }`}
+                  >
+                    Dev Card
+                  </button>
 
-                <div className="w-px h-6 bg-white/20 mx-1" />
+                  <div className="hidden sm:block w-px h-6 bg-white/20 mx-1" />
 
-                <button
-                  onClick={() => setShowTrade(!showTrade)}
-                  className="px-3 py-1.5 bg-stone-700 hover:bg-stone-600 rounded-lg text-sm transition-colors"
-                >
-                  Trade
-                </button>
+                  <button
+                    onClick={() => setShowTrade(!showTrade)}
+                    className="px-3 py-2 sm:py-1.5 bg-stone-700 hover:bg-stone-600 rounded-lg text-sm transition-colors"
+                  >
+                    Trade
+                  </button>
 
-                {player.devCards.filter(d => d.type !== 'victoryPoint' && d.turnBought < state.turnNumber).length > 0 && (
+                  {hasPlayableDevCards && (
+                    <button
+                      onClick={() => setShowDevCards(!showDevCards)}
+                      disabled={player.devCardsPlayedThisTurn >= 1}
+                      className={`px-3 py-2 sm:py-1.5 rounded-lg text-sm transition-colors ${
+                        player.devCardsPlayedThisTurn >= 1
+                          ? 'bg-stone-800 opacity-40 cursor-not-allowed'
+                          : 'bg-purple-700 hover:bg-purple-600'
+                      }`}
+                    >
+                      Play Dev Card
+                    </button>
+                  )}
+                </>
+              )}
+
+              {/* Dev card pre-roll */}
+              {isMainPhase && state.turnPhase === 'pre_roll' &&
+                hasPlayableDevCards &&
+                player.devCardsPlayedThisTurn === 0 && (
                   <button
                     onClick={() => setShowDevCards(!showDevCards)}
-                    disabled={player.devCardsPlayedThisTurn >= 1}
-                    className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-                      player.devCardsPlayedThisTurn >= 1
-                        ? 'bg-stone-800 opacity-40 cursor-not-allowed'
-                        : 'bg-purple-700 hover:bg-purple-600'
-                    }`}
+                    className="px-3 py-2 sm:py-1.5 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm transition-colors"
                   >
                     Play Dev Card
                   </button>
                 )}
-              </>
-            )}
+            </div>
 
-            {/* Dev card pre-roll */}
-            {isMainPhase && state.turnPhase === 'pre_roll' &&
-              player.devCards.filter(d => d.type !== 'victoryPoint' && d.turnBought < state.turnNumber).length > 0 &&
-              player.devCardsPlayedThisTurn === 0 && (
+            {/* Right side */}
+            <div className="flex items-center gap-2 justify-end">
+              <button
+                onClick={() => doAction({ type: 'UNDO' })}
+                className="px-3 py-2 sm:py-1.5 bg-stone-700 hover:bg-stone-600 rounded-lg text-xs transition-colors"
+              >
+                Undo
+              </button>
+
+              {showPostRoll && (
                 <button
-                  onClick={() => setShowDevCards(!showDevCards)}
-                  className="px-3 py-1.5 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm transition-colors"
+                  onClick={() => {
+                    doAction({ type: 'END_TURN' });
+                    setBuildMode(null);
+                    setShowTrade(false);
+                    setShowDevCards(false);
+                    setExpanded(false);
+                  }}
+                  className="hidden sm:inline-flex px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg font-medium text-sm transition-colors"
                 >
-                  Play Dev Card
+                  End Turn
                 </button>
               )}
-          </div>
 
-          {/* Right side */}
-          <div className="flex items-center gap-2">
-            {/* Undo */}
-            <button
-              onClick={() => doAction({ type: 'UNDO' })}
-              className="px-3 py-1.5 bg-stone-700 hover:bg-stone-600 rounded-lg text-xs transition-colors"
-            >
-              Undo
-            </button>
-
-            {/* End Turn */}
-            {isMainPhase && state.turnPhase === 'post_roll' && (
-              <button
-                onClick={() => {
-                  doAction({ type: 'END_TURN' });
-                  setBuildMode(null);
-                  setShowTrade(false);
-                  setShowDevCards(false);
-                }}
-                className="px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg font-medium text-sm transition-colors"
-              >
-                End Turn
-              </button>
-            )}
-
-            {/* Player switcher for local play */}
-            {isSetup && (
-              <div className="text-xs text-stone-400">
-                {state.players[state.currentPlayerIndex].name}'s turn
-              </div>
-            )}
+              {isSetup && (
+                <div className="hidden sm:block text-xs text-stone-400">
+                  {player.name}'s turn
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

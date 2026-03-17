@@ -56,6 +56,7 @@ export function TradeResponseDialog() {
           respondingPlayer={respondingPlayer}
           onAccept={() => dispatchAction({ type: 'TRADE_ACCEPT', tradeId: trade.id }, respondingPlayer.id)}
           onReject={() => dispatchAction({ type: 'TRADE_REJECT', tradeId: trade.id }, respondingPlayer.id)}
+          onCounter={(offering, requesting) => dispatchAction({ type: 'TRADE_COUNTER', tradeId: trade.id, offering, requesting }, respondingPlayer.id)}
         />
       </div>
     </div>
@@ -69,6 +70,7 @@ function TradeOfferCard({
   respondingPlayer,
   onAccept,
   onReject,
+  onCounter,
 }: {
   trade: TradeOffer;
   offererName: string;
@@ -76,11 +78,42 @@ function TradeOfferCard({
   respondingPlayer: { id: number; name: string; color: PlayerColor; resources: Record<Resource, number> };
   onAccept: () => void;
   onReject: () => void;
+  onCounter: (offering: Partial<Record<Resource, number>>, requesting: Partial<Record<Resource, number>>) => void;
 }) {
-  // Check if responder can afford it
+  const [showCounter, setShowCounter] = useState(false);
+
+  // Pre-populate counter with inverse of original trade
+  const [counterOffering, setCounterOffering] = useState<Partial<Record<Resource, number>>>(() => ({ ...trade.requesting }));
+  const [counterRequesting, setCounterRequesting] = useState<Partial<Record<Resource, number>>>(() => ({ ...trade.offering }));
+
+  // Check if responder can afford the original trade
   const canAfford = ALL_RESOURCES.every(
     r => respondingPlayer.resources[r] >= (trade.requesting[r] ?? 0)
   );
+
+  // Check if responder can afford their counter-offer
+  const canAffordCounter = ALL_RESOURCES.every(
+    r => respondingPlayer.resources[r] >= (counterOffering[r] ?? 0)
+  );
+
+  // Check counter-offer has at least something on each side
+  const counterHasOffering = ALL_RESOURCES.some(r => (counterOffering[r] ?? 0) > 0);
+  const counterHasRequesting = ALL_RESOURCES.some(r => (counterRequesting[r] ?? 0) > 0);
+  const canSubmitCounter = canAffordCounter && counterHasOffering && counterHasRequesting;
+
+  function adjustCounterOffer(res: Resource, delta: number) {
+    setCounterOffering(prev => {
+      const val = Math.max(0, Math.min(respondingPlayer.resources[res], (prev[res] ?? 0) + delta));
+      return { ...prev, [res]: val };
+    });
+  }
+
+  function adjustCounterRequest(res: Resource, delta: number) {
+    setCounterRequesting(prev => {
+      const val = Math.max(0, (prev[res] ?? 0) + delta);
+      return { ...prev, [res]: val };
+    });
+  }
 
   return (
     <div>
@@ -136,12 +169,68 @@ function TradeOfferCard({
           {canAfford ? 'Accept' : "Can't afford"}
         </button>
         <button
+          onClick={() => setShowCounter(prev => !prev)}
+          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            showCounter
+              ? 'bg-amber-600 text-white'
+              : 'bg-amber-900/60 hover:bg-amber-800/60 text-amber-200'
+          }`}
+        >
+          Counter
+        </button>
+        <button
           onClick={onReject}
           className="flex-1 py-2 bg-red-900/60 hover:bg-red-800/60 text-red-200 rounded-lg text-sm font-medium transition-colors"
         >
           Reject
         </button>
       </div>
+
+      {/* Counter-offer form */}
+      {showCounter && (
+        <div className="mt-3 pt-3 border-t border-white/10">
+          <div className="text-xs text-stone-400 mb-2 font-medium">Your counter-offer</div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div>
+              <div className="text-[10px] text-stone-400 mb-1 uppercase tracking-wide">You give</div>
+              {ALL_RESOURCES.map(res => (
+                <div key={res} className="flex items-center justify-between py-0.5">
+                  <span className="text-xs text-white">{RESOURCE_ICONS[res]} {res}</span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => adjustCounterOffer(res, -1)} className="w-5 h-5 rounded bg-stone-700 hover:bg-stone-600 text-white text-xs transition-colors">-</button>
+                    <span className="text-xs text-white w-4 text-center tabular-nums">{counterOffering[res] ?? 0}</span>
+                    <button onClick={() => adjustCounterOffer(res, 1)} className="w-5 h-5 rounded bg-stone-700 hover:bg-stone-600 text-white text-xs transition-colors">+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="text-[10px] text-stone-400 mb-1 uppercase tracking-wide">You want</div>
+              {ALL_RESOURCES.map(res => (
+                <div key={res} className="flex items-center justify-between py-0.5">
+                  <span className="text-xs text-white">{RESOURCE_ICONS[res]} {res}</span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => adjustCounterRequest(res, -1)} className="w-5 h-5 rounded bg-stone-700 hover:bg-stone-600 text-white text-xs transition-colors">-</button>
+                    <span className="text-xs text-white w-4 text-center tabular-nums">{counterRequesting[res] ?? 0}</span>
+                    <button onClick={() => adjustCounterRequest(res, 1)} className="w-5 h-5 rounded bg-stone-700 hover:bg-stone-600 text-white text-xs transition-colors">+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <button
+            onClick={() => onCounter(counterOffering, counterRequesting)}
+            disabled={!canSubmitCounter}
+            className={`w-full py-2 rounded-lg text-sm font-medium transition-colors ${
+              canSubmitCounter
+                ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                : 'bg-stone-700 text-stone-500 cursor-not-allowed'
+            }`}
+          >
+            {!canAffordCounter ? "Can't afford counter" : !counterHasOffering || !counterHasRequesting ? 'Select resources' : 'Send Counter-Offer'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

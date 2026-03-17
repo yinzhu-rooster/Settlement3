@@ -29,4 +29,26 @@ html, body, #root {
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Touch-friendly targets on mobile */
+@media (max-width: 639px) {
+  button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Bottom sheet slide animation */
+.bottom-sheet-enter {
+  transform: translateY(100%);
+}
+.bottom-sheet-open {
+  transform: translateY(0);
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.bottom-sheet-closed {
+  transform: translateY(calc(100% - 3.5rem));
+  transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
 }

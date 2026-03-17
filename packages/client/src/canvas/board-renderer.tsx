@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import type { GameState, GameAction, ActionResult, HexTile, Resource, PlayerColor } from '@settlement3/shared';
 import { hexToPixel, hexCorners, vertexPixelPosition, hexKey } from '@settlement3/shared';
@@ -9,6 +9,12 @@ import {
   getValidRoadEdges,
   getValidCityVertices,
 } from '@settlement3/shared';
+
+// Pan & zoom constants
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.5;
+const ZOOM_SENSITIVITY = 0.001;
+const PAN_DRAG_THRESHOLD = 4; // pixels moved before we consider it a drag (not a click)
 
 const HEX_SIZE = 60;
 
@@ -42,6 +48,21 @@ export function BoardRenderer({ width, height }: BoardRendererProps) {
   const gameState = useGameState();
   const dispatchAction = useDispatch();
   const { buildMode, setBuildMode } = useBuildMode();
+
+  // Persistent pan/zoom state across re-renders
+  const panRef = useRef({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
+  // Ref to the board container so we can update transforms without re-rendering
+  const boardContainerRef = useRef<Container | null>(null);
+
+  // Apply current pan/zoom to the board container
+  const applyTransform = useCallback(() => {
+    const container = boardContainerRef.current;
+    if (!container) return;
+    container.x = width / 2 + panRef.current.x;
+    container.y = height / 2 + panRef.current.y;
+    container.scale.set(zoomRef.current);
+  }, [width, height]);
 
   // Initialize PixiJS — only once
   useEffect(() => {
@@ -80,19 +101,189 @@ export function BoardRenderer({ width, height }: BoardRendererProps) {
     const app = appRef.current;
     if (!app || !ready) return;
     app.renderer.resize(width, height);
-  }, [width, height, ready]);
+    // Re-apply transform since width/height changed the center offset
+    applyTransform();
+  }, [width, height, ready, applyTransform]);
+
+  // Pan & zoom event listeners — attached once when app is ready
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app || !ready) return;
+
+    const canvas = app.canvas as HTMLCanvasElement;
+
+    // --- Pointer (mouse/touch) pan state ---
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartY = 0;
+    let panStartOffsetX = 0;
+    let panStartOffsetY = 0;
+    let totalDragDistance = 0;
+
+    // --- Pinch-to-zoom state ---
+    const activePointers = new Map<number, { x: number; y: number }>();
+
+    function getPointerDistance(): number {
+      const pts = Array.from(activePointers.values());
+      if (pts.length < 2) return 0;
+      const dx = pts[1].x - pts[0].x;
+      const dy = pts[1].y - pts[0].y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function getPointerCenter(): { x: number; y: number } {
+      const pts = Array.from(activePointers.values());
+      if (pts.length < 2) return { x: 0, y: 0 };
+      return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    }
+
+    let pinchStartDist = 0;
+    let pinchStartZoom = 1;
+
+    function onPointerDown(e: PointerEvent) {
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (activePointers.size === 1) {
+        // Start potential pan
+        isPanning = true;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
+        panStartOffsetX = panRef.current.x;
+        panStartOffsetY = panRef.current.y;
+        totalDragDistance = 0;
+      } else if (activePointers.size === 2) {
+        // Switch from pan to pinch
+        isPanning = false;
+        pinchStartDist = getPointerDistance();
+        pinchStartZoom = zoomRef.current;
+      }
+    }
+
+    function onPointerMove(e: PointerEvent) {
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (activePointers.size === 2) {
+        // Pinch-to-zoom
+        const dist = getPointerDistance();
+        if (pinchStartDist > 0) {
+          const center = getPointerCenter();
+          const rect = canvas.getBoundingClientRect();
+          const cx = center.x - rect.left;
+          const cy = center.y - rect.top;
+
+          const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, pinchStartZoom * (dist / pinchStartDist)));
+          zoomToPoint(cx, cy, newZoom);
+        }
+      } else if (isPanning && activePointers.size === 1) {
+        // Pan
+        const dx = e.clientX - panStartX;
+        const dy = e.clientY - panStartY;
+        totalDragDistance += Math.abs(e.movementX) + Math.abs(e.movementY);
+        panRef.current.x = panStartOffsetX + dx;
+        panRef.current.y = panStartOffsetY + dy;
+        applyTransform();
+      }
+    }
+
+    function onPointerUp(e: PointerEvent) {
+      activePointers.delete(e.pointerId);
+
+      if (activePointers.size < 2) {
+        pinchStartDist = 0;
+      }
+      if (activePointers.size === 0) {
+        isPanning = false;
+      }
+      // If remaining single pointer, re-anchor pan from its position
+      if (activePointers.size === 1) {
+        const remaining = Array.from(activePointers.values())[0];
+        isPanning = true;
+        panStartX = remaining.x;
+        panStartY = remaining.y;
+        panStartOffsetX = panRef.current.x;
+        panStartOffsetY = panRef.current.y;
+        totalDragDistance = 0;
+      }
+    }
+
+    function zoomToPoint(screenX: number, screenY: number, newZoom: number) {
+      const oldZoom = zoomRef.current;
+      // The board container pivot is at (0,0), positioned at (width/2 + panX, height/2 + panY)
+      // Screen point maps to world point: worldX = (screenX - containerX) / oldZoom
+      const containerX = width / 2 + panRef.current.x;
+      const containerY = height / 2 + panRef.current.y;
+      const worldX = (screenX - containerX) / oldZoom;
+      const worldY = (screenY - containerY) / oldZoom;
+
+      // After zoom, the same world point should be under the same screen point:
+      // screenX = (width/2 + newPanX) + worldX * newZoom
+      // newPanX = screenX - width/2 - worldX * newZoom
+      panRef.current.x = screenX - width / 2 - worldX * newZoom;
+      panRef.current.y = screenY - height / 2 - worldY * newZoom;
+      zoomRef.current = newZoom;
+      applyTransform();
+    }
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const zoomDelta = -e.deltaY * ZOOM_SENSITIVITY;
+      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoomRef.current * (1 + zoomDelta)));
+      zoomToPoint(mouseX, mouseY, newZoom);
+    }
+
+    // Suppress click events on the canvas if the user was dragging (prevents
+    // accidental settlement/road placement after panning). We capture the click
+    // before PixiJS sees it.
+    function onClickCapture(e: MouseEvent) {
+      if (totalDragDistance > PAN_DRAG_THRESHOLD) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointerleave', onPointerUp);
+    canvas.addEventListener('pointercancel', onPointerUp);
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    canvas.addEventListener('click', onClickCapture, true);
+
+    // Prevent default touch behavior (scroll, zoom) on the canvas
+    function preventTouchDefault(e: TouchEvent) { e.preventDefault(); }
+    canvas.addEventListener('touchstart', preventTouchDefault, { passive: false });
+    canvas.addEventListener('touchmove', preventTouchDefault, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerup', onPointerUp);
+      canvas.removeEventListener('pointerleave', onPointerUp);
+      canvas.removeEventListener('pointercancel', onPointerUp);
+      canvas.removeEventListener('wheel', onWheel);
+      canvas.removeEventListener('click', onClickCapture, true);
+      canvas.removeEventListener('touchstart', preventTouchDefault);
+      canvas.removeEventListener('touchmove', preventTouchDefault);
+    };
+  }, [ready, width, height, applyTransform]);
 
   // Render board whenever state changes or app becomes ready
   useEffect(() => {
     const app = appRef.current;
     if (!app || !ready) return;
 
-    renderBoard(app, gameState, dispatchAction, width, height, buildMode, setBuildMode);
-  }, [gameState, ready, width, height, dispatchAction, buildMode, setBuildMode]);
+    const container = renderBoard(app, gameState, dispatchAction, width, height, buildMode, setBuildMode);
+    boardContainerRef.current = container;
+    applyTransform();
+  }, [gameState, ready, width, height, dispatchAction, buildMode, setBuildMode, applyTransform]);
 
   return (
     <div className="relative" style={{ width, height }}>
-      <div ref={canvasRef} style={{ width, height }} className="cursor-default" />
+      <div ref={canvasRef} style={{ width, height }} className="cursor-grab active:cursor-grabbing" />
       {!ready && (
         <div className="absolute inset-0 flex items-center justify-center text-white text-sm bg-[#1a3a5c]">
           Loading board...
@@ -116,7 +307,7 @@ function renderBoard(
   height: number,
   buildMode: BuildMode,
   setBuildMode: (mode: BuildMode) => void
-) {
+): Container {
   const { turnPhase } = state;
 
   // Determine interaction mode from game state + build mode
@@ -146,8 +337,8 @@ function renderBoard(
   app.stage.removeChildren();
 
   const boardContainer = new Container();
-  boardContainer.x = width / 2;
-  boardContainer.y = height / 2;
+  // Position and scale are applied by applyTransform() after this function returns.
+  // Default position (width/2, height/2) is set there along with pan offset and zoom.
   boardContainer.eventMode = 'static';
   app.stage.addChild(boardContainer);
 
@@ -164,6 +355,8 @@ function renderBoard(
 
   // Draw vertices (settlements/cities)
   drawVertices(boardContainer, state, wrappedDispatch, interactionMode);
+
+  return boardContainer;
 }
 
 function drawHex(

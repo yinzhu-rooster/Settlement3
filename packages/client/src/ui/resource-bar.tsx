@@ -22,14 +22,14 @@ export function ResourceBar() {
   const player = state.players[state.currentPlayerIndex];
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1 sm:gap-2">
       {ALL_RESOURCES.map((res) => (
         <div
           key={res}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg ${RESOURCE_COLORS[res]} text-white shadow-sm`}
+          className={`flex items-center gap-0.5 sm:gap-1 px-1.5 sm:px-2.5 py-1 sm:py-1.5 rounded-md sm:rounded-lg ${RESOURCE_COLORS[res]} text-white shadow-sm`}
         >
-          <span className="text-sm">{RESOURCE_ICONS[res]}</span>
-          <span className="text-sm font-bold tabular-nums">{player.resources[res]}</span>
+          <span className="text-xs sm:text-sm">{RESOURCE_ICONS[res]}</span>
+          <span className="text-xs sm:text-sm font-bold tabular-nums">{player.resources[res]}</span>
         </div>
       ))}
     </div>
